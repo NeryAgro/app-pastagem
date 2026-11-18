@@ -16,4 +16,5 @@ Para testar no computador: `python3 -m http.server` nesta pasta e abrir http://l
 - `js/config.js`: Project URL e chave anon do Supabase. Vazio = app só no aparelho, sem login.
 - `js/auth.js`: login, cadastro, senha, painel do dono e sincronização (aparelho primeiro; envia e recebe quando há internet).
 - `supabase/02-produtos.sql`: catálogo único de produtos (tabela `produtos`). Todos veem os aprovados; produto novo entra "pendente"; só o dono aprova, rejeita e edita (Painel do dono).
+- `supabase/03-cadastro.sql`: cadastro completo (WhatsApp, empresa, categoria Técnico/Vendedor/RC, município, estado).
 - Nada é apagado de verdade na nuvem: o app marca `apagado`, para o histórico servir à sugestão de doses.

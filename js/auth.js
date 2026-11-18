@@ -3,7 +3,23 @@
   const CFG = window.APP_CONFIG || {};
   let liberar; window.__authPronto = new Promise(r => { liberar = r; });
   const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  const PAPEIS = { tecnico: "Técnico", vendedor: "Vendedor", admin: "Dono" };
+  const PAPEIS = { tecnico: "Técnico", vendedor: "Vendedor", rc: "RC", admin: "Dono" };
+  const UFS = ["AC","AL","AP","AM","BA","CE","DF","ES","GO","MA","MT","MS","MG","PA","PB","PR","PE","PI","RJ","RN","RS","RO","RR","SC","SP","SE","TO"];
+  const soDigitos = s => String(s || "").replace(/\D/g, "");
+  const camposPerfil = (p) => `
+        <label class="f">WhatsApp (com DDD)<input name="telefone" inputmode="tel" autocomplete="tel" required placeholder="(99) 99999-9999" value="${esc(p.telefone)}"></label>
+        <label class="f">Empresa<input name="empresa" autocomplete="organization" required value="${esc(p.empresa)}"></label>
+        <div class="grid2"><label class="f">Município<input name="municipio" autocomplete="address-level2" required value="${esc(p.municipio)}"></label>
+        <label class="f">Estado<select name="uf" required><option value="">UF</option>${UFS.map(u => `<option ${u === p.uf ? "selected" : ""}>${u}</option>`).join("")}</select></label></div>`;
+  function validarPerfil(v) {
+    if (!String(v.nome || "").trim()) return "Preencha o nome.";
+    if (soDigitos(v.telefone).length < 10) return "Informe o WhatsApp com DDD.";
+    if (!String(v.empresa || "").trim()) return "Preencha a empresa.";
+    if (!String(v.municipio || "").trim()) return "Preencha o município.";
+    if (!v.uf) return "Escolha o estado.";
+    return "";
+  }
+  const perfilIncompleto = p => p && p.papel !== undefined && (!p.telefone || !p.empresa || !p.municipio || !p.uf);
   const STATUS = { pendente: "Aguardando aprovação", ativo: "Ativo", bloqueado: "Bloqueado" };
 
   // Sem Supabase configurado: modo só no aparelho, como antes.
@@ -62,15 +78,27 @@
     mostrar(`<h1>Criar conta</h1>
       <p class="note">Depois do cadastro, o seu acesso fica aguardando a aprovação do administrador.</p>
       <form class="auth-form" data-form="cadastro">
+        <p class="note">Todos os campos são obrigatórios.</p>
         <label class="f">Nome completo<input name="nome" autocomplete="name" required></label>
-        <label class="f">Telefone<input name="telefone" inputmode="tel" autocomplete="tel"></label>
-        <label class="f">Função<select name="papel"><option value="tecnico">Técnico</option><option value="vendedor">Vendedor</option></select></label>
         <label class="f">E-mail<input type="email" name="email" autocomplete="email" required></label>
+        ${camposPerfil({})}
+        <label class="f">Categoria<select name="papel" required><option value="">Escolha…</option><option value="tecnico">Técnico</option><option value="vendedor">Vendedor</option><option value="rc">RC</option></select></label>
         <label class="f">Senha (mínimo 6 caracteres)<input type="password" name="senha" autocomplete="new-password" minlength="6" required></label>
         <p class="auth-msg"></p>
         <button class="primary" type="submit">Criar conta</button>
       </form>
       <div class="auth-links"><button class="ghost" data-auth="entrar">Já tenho conta</button></div>`);
+  }
+  function telaCompletar() {
+    mostrar(`<h1>Complete o seu cadastro</h1>
+      <p class="note">Precisamos destes dados para liberar o seu acesso. Todos são obrigatórios.</p>
+      <form class="auth-form" data-form="completar">
+        ${perfil.nome ? "" : `<label class="f">Nome completo<input name="nome" autocomplete="name" required></label>`}
+        ${camposPerfil(perfil)}
+        <p class="auth-msg"></p>
+        <button class="primary" type="submit">Salvar</button>
+      </form>
+      <div class="auth-links"><button class="ghost" data-auth="sair">Sair</button></div>`);
   }
   function telaEsqueci() {
     mostrar(`<h1>Esqueci a senha</h1>
@@ -128,13 +156,22 @@
         if (error) throw error;
         await entrar(data.user);
       } else if (tipo === "cadastro") {
+        const inval = validarPerfil(v) || (!v.papel ? "Escolha a categoria." : "");
+        if (inval) { msg(inval, true); ocupado(false); return; }
         const { data, error } = await sb.auth.signUp({
           email: v.email.trim(), password: v.senha,
-          options: { data: { nome: v.nome.trim(), telefone: (v.telefone || "").trim(), papel: v.papel }, emailRedirectTo: voltarPara }
+          options: { data: { nome: v.nome.trim(), telefone: v.telefone.trim(), empresa: v.empresa.trim(), municipio: v.municipio.trim(), uf: v.uf, papel: v.papel }, emailRedirectTo: voltarPara }
         });
         if (error) throw error;
         if (data.session) await entrar(data.user);
         else telaEntrar("Cadastro feito. Enviamos um link para o seu e-mail: abra o link para confirmar e depois entre aqui.");
+      } else if (tipo === "completar") {
+        v.nome = perfil.nome || v.nome;
+        const inval = validarPerfil(v); if (inval) { msg(inval, true); ocupado(false); return; }
+        const upd = { nome: (v.nome || "").trim(), telefone: v.telefone.trim(), empresa: v.empresa.trim(), municipio: v.municipio.trim(), uf: v.uf };
+        const { error } = await sb.from("perfis").update(upd).eq("id", usuario.id);
+        if (error) throw error;
+        await entrar(usuario);
       } else if (tipo === "esqueci") {
         const { error } = await sb.auth.resetPasswordForEmail(v.email.trim(), { redirectTo: voltarPara });
         if (error) throw error;
@@ -172,6 +209,7 @@
     if (!perfil) { perfil = { nome: (u.user_metadata || {}).nome, status: "pendente" }; return telaPendente(); }
     if (perfil.status === "pendente") return telaPendente();
     if (perfil.status === "bloqueado") return telaBloqueado();
+    if (perfilIncompleto(perfil) && navigator.onLine) return telaCompletar();
     await iniciarApp();
   }
 
@@ -300,7 +338,7 @@
     if (!perfil) return "";
     return `<section class="card section">
       <h2>Sua conta</h2>
-      <p><b>${esc(perfil.nome || "")}</b> · ${esc(PAPEIS[perfil.papel] || "")}<br><span class="note">${esc(perfil.email || (usuario && usuario.email) || "")}</span></p>
+      <p><b>${esc(perfil.nome || "")}</b> · ${esc(PAPEIS[perfil.papel] || "")}<br><span class="note">${esc(perfil.email || (usuario && usuario.email) || "")}${perfil.telefone ? " · " + esc(perfil.telefone) : ""}<br>${esc([perfil.empresa, [perfil.municipio, perfil.uf].filter(Boolean).join("/")].filter(Boolean).join(" · "))}</span></p>
       <p class="note" id="contaSync">${esc(sync ? sync.status() : "")}</p>
       <div class="row">
         <button data-conta="sync">Sincronizar agora</button>
@@ -341,13 +379,13 @@
         <div class="row"><button data-painel="exportar">Exportar dados de todos (JSON)</button></div>
         <p class="auth-msg"></p>
         ${perfis.map(p => { const c = cont[p.id] || {}; const eu = usuario && p.id === usuario.id; return `<div class="card section user-row">
-          <div class="row spread"><div><b>${esc(p.nome || "(sem nome)")}</b>${eu ? " (você)" : ""}<br><span class="note">${esc(p.email || "")}${p.telefone ? " · " + esc(p.telefone) : ""}</span></div>
+          <div class="row spread"><div><b>${esc(p.nome || "(sem nome)")}</b>${eu ? " (você)" : ""}<br><span class="note">${esc(p.email || "")}${p.telefone ? ` · WhatsApp <a href="https://wa.me/55${soDigitos(p.telefone)}" target="_blank" rel="noopener">${esc(p.telefone)}</a>` : ""}<br>${esc([p.empresa, [p.municipio, p.uf].filter(Boolean).join("/")].filter(Boolean).join(" · ") || "Cadastro incompleto")}</span></div>
           <span class="pill st-${esc(p.status)}">${esc(STATUS[p.status] || p.status)}</span></div>
           <p class="note">${esc(PAPEIS[p.papel] || p.papel)} · desde ${new Date(p.criado_em).toLocaleDateString("pt-BR")} · ${c.clientes || 0} cliente(s), ${c.pastos || 0} pasto(s), ${c.areas || 0} área(s)</p>
           ${eu ? "" : `<div class="row">
             ${p.status !== "ativo" ? `<button class="primary" data-painel="status" data-id="${p.id}" data-v="ativo" data-p="${esc(p.papel)}">${p.status === "pendente" ? "Aprovar" : "Reativar"}</button>` : ""}
             ${p.status !== "bloqueado" ? `<button class="ghost" data-painel="status" data-id="${p.id}" data-v="bloqueado" data-p="${esc(p.papel)}">Bloquear</button>` : ""}
-            <select data-painel-papel="${p.id}" data-s="${esc(p.status)}">${["tecnico", "vendedor"].map(x => `<option value="${x}" ${p.papel === x ? "selected" : ""}>${PAPEIS[x]}</option>`).join("")}</select>
+            <select data-painel-papel="${p.id}" data-s="${esc(p.status)}">${["tecnico", "vendedor", "rc"].map(x => `<option value="${x}" ${p.papel === x ? "selected" : ""}>${PAPEIS[x]}</option>`).join("")}</select>
           </div>`}
         </div>`; }).join("")}
       </div>`;
@@ -430,7 +468,7 @@
     else if (a === "exportar") {
       b.disabled = true; b.textContent = "Exportando…";
       try {
-        const { data: perfis } = await sb.from("perfis").select("id,nome,email,papel,status");
+        const { data: perfis } = await sb.from("perfis").select("id,nome,email,telefone,empresa,municipio,uf,papel,status");
         const linhas = [];
         for (let de = 0; ; de += 500) {
           const { data, error } = await sb.from("docs").select("user_id,col,id,data,atualizado_em").eq("apagado", false).order("atualizado_em").range(de, de + 499);

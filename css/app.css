@@ -184,3 +184,4 @@ textarea{min-height:76px;resize:vertical}
 .painel-h{margin:12px 0 0}
 details.card summary{cursor:pointer;padding:4px 0}
 details.card[open] summary{margin-bottom:10px}
+.grid2{display:grid;grid-template-columns:1fr 96px;gap:10px}.grid2 .f select,.grid2 .f input{width:100%}
