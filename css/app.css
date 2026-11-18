@@ -155,3 +155,22 @@ textarea{min-height:76px;resize:vertical}
 /* marca Agro Express Pasto */
 .top .logo{height:auto!important;padding:0!important;background:transparent}
 .top .logo img{height:36px!important}
+
+/* login, cadastro e painel do dono */
+.auth{position:fixed;inset:0;z-index:50;background:var(--bg);overflow:auto;padding:calc(env(safe-area-inset-top,0px) + 24px) 16px calc(env(safe-area-inset-bottom,0px) + 24px)}
+.auth[hidden]{display:none}
+.auth-in{max-width:420px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+.auth-in.wide{max-width:720px}
+.auth-logo{height:56px;width:auto;align-self:flex-start;margin-bottom:8px}
+.auth h1{margin:0}
+.auth-form{display:flex;flex-direction:column;gap:12px}
+.auth-form .f input,.auth-form .f select{width:100%}
+.auth-links{display:flex;flex-wrap:wrap;gap:8px}
+.auth-msg{margin:0;min-height:1.2em;color:var(--muted)}
+.auth-msg.err{color:var(--bad)}
+.painel{z-index:60}
+.user-row .row{gap:8px;flex-wrap:wrap}
+.pill{font-size:12px;padding:2px 8px;border-radius:999px;background:var(--surface-2);white-space:nowrap}
+.pill.st-pendente{background:var(--warn-soft);color:var(--warn)}
+.pill.st-ativo{background:var(--grass-soft);color:var(--grass)}
+.pill.st-bloqueado{background:var(--bad-soft);color:var(--bad)}

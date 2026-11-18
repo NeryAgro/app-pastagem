@@ -379,6 +379,7 @@ function vAjustes(){
 }
 function vDados(c){
   return `<div><div class="eyebrow">Ajustes</div><h1>Dados</h1></div>
+  ${window.__contaHTML?window.__contaHTML():""}
   <section class="card section">
     <h2>Dados padrão do relatório</h2>
     <p class="note" style="margin-top:-4px">Preenchem automaticamente cada novo cliente. Para mudar só um cliente, edite no cadastro dele.</p>
@@ -391,7 +392,7 @@ function vDados(c){
   </section>
   <section class="card section">
     <h2>Backup dos dados</h2>
-    <p class="note">Nesta versão offline os dados ficam guardados só neste aparelho e navegador. Exporte um backup com frequência: ele serve para não perder nada e para passar os dados para outro aparelho.</p>
+    <p class="note">${window.__nuvem?"Seus dados ficam no aparelho e são copiados para a nuvem sempre que há internet. O backup é uma cópia extra, em arquivo.":"Nesta versão offline os dados ficam guardados só neste aparelho e navegador. Exporte um backup com frequência: ele serve para não perder nada e para passar os dados para outro aparelho."}</p>
     <div class="row"><button class="primary" data-a="exportar-backup">Exportar backup</button><label class="btn file-btn">Importar backup<input type="file" id="bk-imp" accept=".json,application/json"></label></div>
   </section>`;
 }
@@ -808,6 +809,7 @@ async function semearProdutos(){
 }
 /* ---------- boot ---------- */
 (async()=>{
+  await (window.__authPronto||Promise.resolve());
   if(!window.claude?.use){ setSync("Modo offline",true); $app.innerHTML=`<div class="card empty"><b>Abra este app pelo link do Claude</b>Os dados ficam guardados online e só carregam dentro do Claude.</div>`; return; }
   db=await claude.use("db");
   if(!db){ setSync("Sem acesso",true); $app.innerHTML=`<div class="card empty"><b>Não foi possível acessar os dados</b>Entre na sua conta Claude e abra o link novamente.</div>`; return; }
