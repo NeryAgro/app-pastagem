@@ -218,7 +218,7 @@
     iniciado = true;
     mostrar(`<p class="note">Carregando os seus dados…</p>`);
     sync = criarSync(usuario.id);
-    const store = window.criarStore("aep-" + usuario.id, (col, id) => { if (col !== "produtos") sync.marcar(col, id); });
+    const store = window.criarStore("aep-" + usuario.id, (col, id) => { if (col !== "produtos" && col[0] !== "_") sync.marcar(col, id); });
     window.__souAdmin = perfil.papel === "admin";
     sync.ligar(store.db);
     window.instalarStore(store);
@@ -303,6 +303,17 @@
       const locais = Object.keys(((await db._tudo()).produtos) || {});
       for (const id of locais) if (!ids.has(id)) await db._aplicarRemoto("produtos", id, null);
     }
+    // PDFs gerados: ficam na fila do aparelho até subir para a nuvem (Storage "propostas").
+    async function enviarPdfs() {
+      const fila = ((await db._tudo())._pdfpend) || {};
+      for (const [id, f] of Object.entries(fila)) {
+        const blob = await (await fetch(f.dataUrl)).blob();
+        const { error } = await sb.storage.from("propostas").upload(f.caminho, blob, { contentType: "application/pdf", upsert: false });
+        if (error && !/exists|duplicate/i.test(error.message || "")) throw error;
+        await db.doc("pdfs/" + id).set({ ...f.meta, arquivo: f.caminho });
+        await db._aplicarRemoto("_pdfpend", id, null);
+      }
+    }
     return {
       receberProdutos,
       ligar(d) { db = d; },
@@ -313,7 +324,7 @@
         if (rodando) return rodando;
         rodando = (async () => {
           if (!navigator.onLine || !db) { mostrarStatus(); return; }
-          try { await enviar(); await receber(); await receberProdutos(); erro = ""; ultimo = new Date(); }
+          try { await enviarPdfs(); await enviar(); await receber(); await receberProdutos(); erro = ""; ultimo = new Date(); }
           catch (e) { erro = traduz(e); console.warn("sync", e); }
           mostrarStatus();
         })().finally(() => { rodando = null; });
@@ -321,6 +332,20 @@
       }
     };
   }
+
+  /* ---------- PDF de proposta gerado: guarda cópia para o Painel do dono ---------- */
+  window.__guardarPdf = async (info) => {
+    try {
+      const dataUrl = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(info.blob); });
+      const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+      const limpo = String(info.nome || "proposta.pdf").replace(/[^A-Za-z0-9._-]+/g, "_");
+      const caminho = `${usuario.id}/${String(info.clienteId || "sem-cliente").replace(/[^A-Za-z0-9_-]+/g, "_")}/${id}_${limpo}`;
+      const meta = { clienteId: info.clienteId || "", clienteNome: info.clienteNome || "", nome: info.nome || "proposta.pdf", safra: info.safra || "",
+        pastos: info.pastos || 0, areaHa: info.areaHa || 0, total: info.total || 0, criadoEm: new Date().toISOString(), tamanho: info.blob.size };
+      await window.__localdb.doc("_pdfpend/" + id).set({ caminho, dataUrl, meta });
+      sync.rodar();
+    } catch (e) { console.warn("guardar pdf", e); }
+  };
 
   /* ---------- produto novo (vai pendente para aprovação; o dono aprova direto) ---------- */
   window.__enviarProduto = async (p) => {
@@ -365,6 +390,7 @@
     try {
       const { data: perfis, error } = await sb.from("perfis").select("*").order("criado_em", { ascending: true });
       if (error) throw error;
+      perfisCache = {}; perfis.forEach(p => perfisCache[p.id] = p);
       const cont = {};
       for (let de = 0; ; de += 1000) {
         const { data, error: e2 } = await sb.from("docs").select("user_id,col").eq("apagado", false).range(de, de + 999);
@@ -376,12 +402,13 @@
       painel.innerHTML = `<div class="auth-in wide">
         <div class="row spread"><h1>Painel do dono</h1><button class="ghost" data-painel="fechar">Fechar</button></div>
         <p class="note">${perfis.length} usuário(s)${pend ? ` · <b>${pend} aguardando aprovação</b>` : ""}. Cada usuário vê só os próprios dados. Você vê os de todos.</p>
-        <div class="row"><button data-painel="exportar">Exportar dados de todos (JSON)</button></div>
+        <div class="row"><button class="primary" data-painel="xlsx-todos">Planilha de todos (Excel)</button><button data-painel="exportar">Exportar tudo (JSON)</button></div>
         <p class="auth-msg"></p>
         ${perfis.map(p => { const c = cont[p.id] || {}; const eu = usuario && p.id === usuario.id; return `<div class="card section user-row">
           <div class="row spread"><div><b>${esc(p.nome || "(sem nome)")}</b>${eu ? " (você)" : ""}<br><span class="note">${esc(p.email || "")}${p.telefone ? ` · WhatsApp <a href="https://wa.me/55${soDigitos(p.telefone)}" target="_blank" rel="noopener">${esc(p.telefone)}</a>` : ""}<br>${esc([p.empresa, [p.municipio, p.uf].filter(Boolean).join("/")].filter(Boolean).join(" · ") || "Cadastro incompleto")}</span></div>
           <span class="pill st-${esc(p.status)}">${esc(STATUS[p.status] || p.status)}</span></div>
           <p class="note">${esc(PAPEIS[p.papel] || p.papel)} · desde ${new Date(p.criado_em).toLocaleDateString("pt-BR")} · ${c.clientes || 0} cliente(s), ${c.pastos || 0} pasto(s), ${c.areas || 0} área(s)</p>
+          <div class="row"><button data-painel="dados-user" data-id="${p.id}">Ver clientes, KMLs e PDFs</button></div>
           ${eu ? "" : `<div class="row">
             ${p.status !== "ativo" ? `<button class="primary" data-painel="status" data-id="${p.id}" data-v="ativo" data-p="${esc(p.papel)}">${p.status === "pendente" ? "Aprovar" : "Reativar"}</button>` : ""}
             ${p.status !== "bloqueado" ? `<button class="ghost" data-painel="status" data-id="${p.id}" data-v="bloqueado" data-p="${esc(p.papel)}">Bloquear</button>` : ""}
@@ -394,7 +421,7 @@
       painel.innerHTML = `<div class="auth-in wide"><div class="row spread"><h1>Painel do dono</h1><button class="ghost" data-painel="fechar">Fechar</button></div><p class="auth-msg err">${esc(traduz(e))}</p></div>`;
     }
   }
-  let prodCache = [];
+  let prodCache = [], perfisCache = {};
   async function painelProdutos(perfis) {
     const { data, error } = await sb.from("produtos").select("*").order("nome");
     if (error) throw error;
@@ -463,6 +490,8 @@
     else if (a === "status") { b.disabled = true; await definir(b.dataset.id, b.dataset.v, b.dataset.p); }
     else if (a === "prod-status") { b.disabled = true; await produtoStatus(b.dataset.id, b.dataset.v); b.disabled = false; }
     else if (a === "prod-editar") editarProduto(b.dataset.id);
+    else if (a === "dados-user") { const pf = perfisCache[b.dataset.id]; if (pf) window.__painelDados.abrirUsuario(painel, sb, pf, perfisCache, abrirPainel); painel.scrollTop = 0; }
+    else if (a === "xlsx-todos") { b.disabled = true; b.textContent = "Gerando…"; try { await window.__painelDados.planilhaTodos(sb, perfisCache); b.textContent = "Planilha de todos (Excel)"; } catch (err) { b.textContent = "Planilha de todos (Excel)"; erroPainel(err); } b.disabled = false; }
     else if (a === "prod-cancelar") abrirPainel();
     else if (a === "prod-salvar") await salvarProdutoPainel(b);
     else if (a === "exportar") {

@@ -17,4 +17,6 @@ Para testar no computador: `python3 -m http.server` nesta pasta e abrir http://l
 - `js/auth.js`: login, cadastro, senha, painel do dono e sincronização (aparelho primeiro; envia e recebe quando há internet).
 - `supabase/02-produtos.sql`: catálogo único de produtos (tabela `produtos`). Todos veem os aprovados; produto novo entra "pendente"; só o dono aprova, rejeita e edita (Painel do dono).
 - `supabase/03-cadastro.sql`: cadastro completo (WhatsApp, empresa, categoria Técnico/Vendedor/RC, município, estado).
+- `supabase/04-propostas-pdf.sql`: pasta privada "propostas" no Storage para os PDFs gerados (cada usuário envia os seus; o dono lê todos).
+- `js/painel-dados.js`: no Painel do dono, dados por usuário e cliente, planilha Excel, KMLs (.zip) e PDFs.
 - Nada é apagado de verdade na nuvem: o app marca `apagado`, para o histórico servir à sugestão de doses.

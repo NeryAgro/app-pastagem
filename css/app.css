@@ -185,3 +185,6 @@ textarea{min-height:76px;resize:vertical}
 details.card summary{cursor:pointer;padding:4px 0}
 details.card[open] summary{margin-bottom:10px}
 .grid2{display:grid;grid-template-columns:1fr 96px;gap:10px}.grid2 .f select,.grid2 .f input{width:100%}
+.pdf-lista{display:flex;flex-direction:column;gap:6px;margin-top:6px}
+.pdf-item{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--line);border-radius:8px}
+.pdf-item>span{min-width:0;word-break:break-word}

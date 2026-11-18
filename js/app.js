@@ -793,6 +793,7 @@ async function gerarPdf(){
     const nome=`Recomendacao_${(c.nome||"cliente").normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^A-Za-z0-9]+/g,"_")}_${(d.safra||"").replace(/\D+/g,"-")}.pdf`;
     const blob=doc.output("blob");
     S.lastPdf={nome,blob};
+    try{ const rs=resumo(lista,d.precos); if(window.__guardarPdf) window.__guardarPdf({blob,nome,clienteId:S.view.id,clienteNome:c.nome||"",safra:d.safra||"",pastos:lista.length,areaHa:+rs.ha.toFixed(2),total:+rs.total.toFixed(2)}); }catch(e){ console.warn(e); }
     if(!downloads){ toast("Download não disponível nesta visualização."); return; }
     S.gerando="Confirme o download…"; bar();
     try{ await downloads.save({filename:nome,data:blob}); toast("PDF salvo"); }
