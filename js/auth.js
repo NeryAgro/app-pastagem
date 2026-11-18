@@ -56,6 +56,7 @@
     if (/Email not confirmed/i.test(m)) return "Confirme o seu e-mail pelo link que enviamos antes de entrar.";
     if (/User already registered/i.test(m)) return "Este e-mail já tem cadastro. Use \"Entrar\" ou \"Esqueci a senha\".";
     if (/Password should be at least/i.test(m)) return "A senha precisa ter pelo menos 6 caracteres.";
+    if (/email rate limit/i.test(m)) return "O servidor atingiu o limite de e-mails de confirmação por hora. Tente de novo mais tarde ou avise o administrador do app.";
     if (/rate limit|too many/i.test(m)) return "Muitas tentativas. Espere alguns minutos e tente de novo.";
     if (/Failed to fetch|NetworkError|network/i.test(m)) return "Sem internet. Conecte e tente de novo.";
     if (/valid email|invalid.*email/i.test(m)) return "Confira o e-mail digitado.";
