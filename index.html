@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Agro Express Pasto</title>
+<meta name="theme-color" content="#14532D">
+<meta name="description" content="Levantamento de pastagem e proposta técnica e comercial.">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/favicon-32.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="AE Pasto">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=Figtree:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<header class="top"><div class="top-in">
+  <div class="logo"><img id="logo" alt="Agro Express Pasto" src="img/logo.png"></div>
+  <div class="sync" id="sync">Conectando…</div>
+  <button class="ghost cfg" data-a="abrir-areas" aria-label="Biblioteca de áreas">Áreas</button>
+  <button class="ghost cfg c2" data-a="abrir-ajustes" aria-label="Produtos e ajustes">Produtos</button>
+  <button class="ghost cfg c2" data-a="abrir-dados" aria-label="Dados do relatório e backup">Dados</button>
+</div></header>
+<main class="main" id="app">
+  <div class="card empty"><b>Carregando clientes…</b>Os dados ficam guardados neste aparelho.</div>
+</main>
+<div id="barSlot"></div>
+<div id="toastSlot"></div>
+
+<datalist id="dl-daninhas"></datalist>
+<datalist id="dl-capim"></datalist>
+
+
+<script src="js/vendor/jszip.min.js"></script>
+<script src="js/vendor/jspdf.umd.min.js"></script>
+<script src="js/vendor/jspdf.plugin.autotable.min.js"></script>
+<script src="js/logo.js"></script>
+<script src="js/store-local.js"></script>
+<script src="js/app.js"></script>
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(e => console.warn("SW", e)));
+}
+</script>
+</body>
+</html>
