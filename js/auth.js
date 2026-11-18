@@ -164,7 +164,11 @@
   async function entrar(u) {
     usuario = u;
     try { perfil = await carregarPerfil(u); }
-    catch (e) { return telaSemInternet(); }
+    catch (e) {
+      if (!navigator.onLine) return telaSemInternet();
+      return mostrar(`<h1>Não foi possível abrir</h1><p class="note">${esc(traduz(e))}</p><p class="note">Se o problema continuar, fale com o administrador do app.</p>
+        <div class="auth-links"><button class="primary" data-auth="verificar">Tentar de novo</button><button class="ghost" data-auth="sair">Sair</button></div>`);
+    }
     if (!perfil) { perfil = { nome: (u.user_metadata || {}).nome, status: "pendente" }; return telaPendente(); }
     if (perfil.status === "pendente") return telaPendente();
     if (perfil.status === "bloqueado") return telaBloqueado();
