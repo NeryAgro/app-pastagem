@@ -15,4 +15,5 @@ Para testar no computador: `python3 -m http.server` nesta pasta e abrir http://l
 - `supabase/01-estrutura.sql`: tabelas `perfis` e `docs` e as regras de acesso (RLS). Cada usuário ativo lê e grava só os próprios dados; o dono (papel `admin`) lê os de todos. O primeiro usuário cadastrado vira o dono. Os demais ficam "pendente" até o dono aprovar no Painel do dono (tela Dados).
 - `js/config.js`: Project URL e chave anon do Supabase. Vazio = app só no aparelho, sem login.
 - `js/auth.js`: login, cadastro, senha, painel do dono e sincronização (aparelho primeiro; envia e recebe quando há internet).
+- `supabase/02-produtos.sql`: catálogo único de produtos (tabela `produtos`). Todos veem os aprovados; produto novo entra "pendente"; só o dono aprova, rejeita e edita (Painel do dono).
 - Nada é apagado de verdade na nuvem: o app marca `apagado`, para o histórico servir à sugestão de doses.

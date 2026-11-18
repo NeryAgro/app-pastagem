@@ -174,3 +174,13 @@ textarea{min-height:76px;resize:vertical}
 .pill.st-pendente{background:var(--warn-soft);color:var(--warn)}
 .pill.st-ativo{background:var(--grass-soft);color:var(--grass)}
 .pill.st-bloqueado{background:var(--bad-soft);color:var(--bad)}
+.prod-lista{display:flex;flex-direction:column;gap:8px}
+.prod-ro{padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+.prod-ro.st-pendente{border-style:dashed}
+.prod-ro.st-rejeitado{opacity:.65}
+.prod-form{display:flex;flex-direction:column;gap:12px}
+.prod-form .f select,.prod-form .f input{width:100%}
+.pa-row{display:grid;grid-template-columns:1fr 120px auto;gap:8px;align-items:end}
+.painel-h{margin:12px 0 0}
+details.card summary{cursor:pointer;padding:4px 0}
+details.card[open] summary{margin-bottom:10px}

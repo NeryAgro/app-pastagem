@@ -180,7 +180,8 @@
     iniciado = true;
     mostrar(`<p class="note">Carregando os seus dados…</p>`);
     sync = criarSync(usuario.id);
-    const store = window.criarStore("aep-" + usuario.id, (col, id) => sync.marcar(col, id));
+    const store = window.criarStore("aep-" + usuario.id, (col, id) => { if (col !== "produtos") sync.marcar(col, id); });
+    window.__souAdmin = perfil.papel === "admin";
     sync.ligar(store.db);
     window.instalarStore(store);
     await store.db._ready;
@@ -240,7 +241,7 @@
         if (error) throw error;
         for (const r of data) {
           const k = r.col + "/" + r.id;
-          if (!pend[k]) {
+          if (r.col !== "produtos" && !pend[k]) {
             const atual = await db._ler(r.col, r.id);
             const novo = r.apagado ? null : r.data;
             if (JSON.stringify(atual) !== JSON.stringify(novo)) await db._aplicarRemoto(r.col, r.id, novo);
@@ -251,7 +252,21 @@
         if (data.length < 500) break;
       }
     }
+    async function receberProdutos() {
+      const { data, error } = await sb.from("produtos").select("id,nome,industria,principios,formulacao,volume,unidade,tipo,status,motivo");
+      if (error) throw error;
+      const ids = new Set();
+      for (const r of data) {
+        ids.add(r.id);
+        const { id, ...d } = r; Object.keys(d).forEach(k => d[k] == null && delete d[k]);
+        const atual = await db._ler("produtos", id);
+        if (JSON.stringify(atual) !== JSON.stringify(d)) await db._aplicarRemoto("produtos", id, d);
+      }
+      const locais = Object.keys(((await db._tudo()).produtos) || {});
+      for (const id of locais) if (!ids.has(id)) await db._aplicarRemoto("produtos", id, null);
+    }
     return {
+      receberProdutos,
       ligar(d) { db = d; },
       pendentes: () => Object.keys(pend).length,
       status,
@@ -260,7 +275,7 @@
         if (rodando) return rodando;
         rodando = (async () => {
           if (!navigator.onLine || !db) { mostrarStatus(); return; }
-          try { await enviar(); await receber(); erro = ""; ultimo = new Date(); }
+          try { await enviar(); await receber(); await receberProdutos(); erro = ""; ultimo = new Date(); }
           catch (e) { erro = traduz(e); console.warn("sync", e); }
           mostrarStatus();
         })().finally(() => { rodando = null; });
@@ -268,6 +283,17 @@
       }
     };
   }
+
+  /* ---------- produto novo (vai pendente para aprovação; o dono aprova direto) ---------- */
+  window.__enviarProduto = async (p) => {
+    if (!navigator.onLine) throw new Error("Sem internet. Para enviar um produto novo é preciso estar conectado.");
+    const linha = { id: window.produtoId(p.nome), nome: p.nome, industria: p.industria, principios: p.principios, formulacao: p.formulacao,
+      volume: p.volume, unidade: p.unidade, tipo: p.tipo, status: window.__souAdmin ? "aprovado" : "pendente", criado_por: usuario.id };
+    if (window.__souAdmin) { linha.revisado_por = usuario.id; linha.revisado_em = new Date().toISOString(); }
+    const { error } = await sb.from("produtos").insert(linha);
+    if (error) throw new Error(traduz(error));
+    await sync.receberProdutos().catch(() => {});
+  };
 
   /* ---------- seção "Sua conta" na tela Dados ---------- */
   window.__contaHTML = () => {
@@ -325,9 +351,67 @@
           </div>`}
         </div>`; }).join("")}
       </div>`;
+      await painelProdutos(perfis);
     } catch (e) {
       painel.innerHTML = `<div class="auth-in wide"><div class="row spread"><h1>Painel do dono</h1><button class="ghost" data-painel="fechar">Fechar</button></div><p class="auth-msg err">${esc(traduz(e))}</p></div>`;
     }
+  }
+  let prodCache = [];
+  async function painelProdutos(perfis) {
+    const { data, error } = await sb.from("produtos").select("*").order("nome");
+    if (error) throw error;
+    prodCache = data;
+    const nomes = {}; (perfis || []).forEach(p => nomes[p.id] = p.nome || p.email);
+    const ST = { pendente: "Aguardando aprovação", aprovado: "Aprovado", rejeitado: "Rejeitado" };
+    const card = (p) => `<div class="card section user-row" data-prod-card="${esc(p.id)}">
+        <div class="row spread"><div><b>${esc(p.nome)}</b><br><span class="note">${esc([p.tipo, p.industria].filter(Boolean).join(" · "))}</span></div>
+        <span class="pill st-${p.status === "aprovado" ? "ativo" : esc(p.status)}">${ST[p.status] || esc(p.status)}</span></div>
+        <p class="note">${esc([window.principiosTexto(p.principios), window.formulacaoTexto(p.formulacao), "Vendido em " + p.volume, "Dose em " + p.unidade + "/ha"].filter(Boolean).join(" · "))}${p.criado_por ? "<br>Enviado por " + esc(nomes[p.criado_por] || "usuário") + " em " + new Date(p.criado_em).toLocaleDateString("pt-BR") : ""}${p.motivo ? "<br>Motivo: " + esc(p.motivo) : ""}</p>
+        <div class="row">
+          ${p.status !== "aprovado" ? `<button class="primary" data-painel="prod-status" data-id="${esc(p.id)}" data-v="aprovado">Aprovar</button>` : ""}
+          <button data-painel="prod-editar" data-id="${esc(p.id)}">Editar</button>
+          ${p.status === "pendente" ? `<button class="ghost" data-painel="prod-status" data-id="${esc(p.id)}" data-v="rejeitado">Rejeitar</button>` : ""}
+          ${p.status === "aprovado" ? `<button class="ghost" data-painel="prod-status" data-id="${esc(p.id)}" data-v="rejeitado">Retirar da lista</button>` : ""}
+        </div>
+      </div>`;
+    const pend = data.filter(p => p.status === "pendente"), outros = data.filter(p => p.status !== "pendente");
+    const html = `<h2 class="painel-h">Produtos${pend.length ? ` · <span class="pill st-pendente">${pend.length} aguardando aprovação</span>` : ""}</h2>
+      ${pend.map(card).join("")}
+      <details class="card section"><summary><b>Todos os produtos (${outros.length})</b></summary>${outros.map(card).join("")}</details>
+      <h2 class="painel-h">Usuários</h2>`;
+    const primeiroUsuario = painel.querySelector(".user-row");
+    if (primeiroUsuario) primeiroUsuario.insertAdjacentHTML("beforebegin", html);
+    else painel.querySelector(".auth-in").insertAdjacentHTML("beforeend", html);
+  }
+  async function produtoStatus(id, status) {
+    let motivo = null;
+    if (status === "rejeitado") { motivo = prompt("Motivo (opcional). Aparece para quem enviou:") ; if (motivo === null) return; }
+    const { error } = await sb.from("produtos").update({ status, motivo: motivo || null, revisado_por: usuario.id, revisado_em: new Date().toISOString() }).eq("id", id);
+    if (error) return erroPainel(error);
+    await sync.receberProdutos().catch(() => {});
+    abrirPainel();
+  }
+  function erroPainel(e) { const m = painel.querySelector(".auth-msg"); if (m) { m.textContent = traduz(e); m.classList.add("err"); m.scrollIntoView({ block: "center" }); } }
+  function editarProduto(id) {
+    const p = prodCache.find(x => x.id === id); if (!p) return;
+    const el = painel.querySelector(`[data-prod-card="${CSS.escape(id)}"]`); if (!el) return;
+    el.innerHTML = `<h3>Editar produto</h3>${window.produtoFormHTML(p)}
+      <p class="note">Unidade da dose por hectare: <select data-pf="unidade">${["L", "mL", "kg", "g"].map(u => `<option ${u === p.unidade ? "selected" : ""}>${u}</option>`).join("")}</select></p>
+      <div class="row"><button class="primary" data-painel="prod-salvar" data-id="${esc(id)}" data-aprovar="${p.status === "pendente" ? 1 : ""}">${p.status === "pendente" ? "Salvar e aprovar" : "Salvar"}</button><button class="ghost" data-painel="prod-cancelar">Cancelar</button></div>
+      <p class="auth-msg"></p>`;
+  }
+  async function salvarProdutoPainel(b) {
+    const card = b.closest("[data-prod-card]"), form = card.querySelector(".prod-form");
+    const v = window.produtoFormLer(form);
+    const u = card.querySelector('[data-pf="unidade"]'); if (u) v.unidade = u.value;
+    const erro = window.produtoFormValidar(v); if (erro) { const m = card.querySelector(".auth-msg"); m.textContent = erro; m.classList.add("err"); return; }
+    const upd = { nome: v.nome, industria: v.industria, principios: v.principios, formulacao: v.formulacao, volume: v.volume, unidade: v.unidade, tipo: v.tipo };
+    if (b.dataset.aprovar) Object.assign(upd, { status: "aprovado", motivo: null, revisado_por: usuario.id, revisado_em: new Date().toISOString() });
+    b.disabled = true;
+    const { error } = await sb.from("produtos").update(upd).eq("id", b.dataset.id);
+    if (error) { b.disabled = false; const m = card.querySelector(".auth-msg"); m.textContent = traduz(error); m.classList.add("err"); return; }
+    await sync.receberProdutos().catch(() => {});
+    abrirPainel();
   }
   async function definir(id, status, papel) {
     const { error } = await sb.rpc("admin_definir_usuario", { alvo: id, novo_status: status, novo_papel: papel });
@@ -339,6 +423,10 @@
     const a = b.dataset.painel;
     if (a === "fechar") { painel.hidden = true; painel.innerHTML = ""; }
     else if (a === "status") { b.disabled = true; await definir(b.dataset.id, b.dataset.v, b.dataset.p); }
+    else if (a === "prod-status") { b.disabled = true; await produtoStatus(b.dataset.id, b.dataset.v); b.disabled = false; }
+    else if (a === "prod-editar") editarProduto(b.dataset.id);
+    else if (a === "prod-cancelar") abrirPainel();
+    else if (a === "prod-salvar") await salvarProdutoPainel(b);
     else if (a === "exportar") {
       b.disabled = true; b.textContent = "Exportando…";
       try {

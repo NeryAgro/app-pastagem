@@ -1,8 +1,8 @@
 // Service worker: guarda o app no aparelho para funcionar sem internet.
-const VERSAO = "aep-v6";
+const VERSAO = "aep-v7";
 const ARQUIVOS = [
   "./", "index.html", "manifest.webmanifest", "css/app.css",
-  "js/logo.js", "js/config.js", "js/auth.js", "js/vendor/supabase.js", "js/store-local.js", "js/app.js",
+  "js/logo.js", "js/config.js", "js/auth.js", "js/produtos.js", "js/vendor/supabase.js", "js/store-local.js", "js/app.js",
   "js/vendor/jszip.min.js", "js/vendor/jspdf.umd.min.js", "js/vendor/jspdf.plugin.autotable.min.js",
   "img/logo.png", "icons/icon-192.png", "icons/icon-512.png", "icons/maskable-512.png", "icons/apple-touch-icon.png", "icons/maskable-192.png", "icons/favicon-32.png"
 ];

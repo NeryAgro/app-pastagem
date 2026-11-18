@@ -295,13 +295,13 @@ function vPasto(){
 
   <section class="card section" id="sec-rec">
     <div class="row spread"><h2>Recomendação</h2><span class="note">Os preços entram uma vez só, na proposta do cliente</span></div>
-    ${d.rec.itens.map((r,i)=>{const prods=S.produtos.map(p=>p.nome); const lista=r.produto&&!prods.includes(r.produto)?[r.produto,...prods]:prods; return `<div class="rec">
+    ${d.rec.itens.map((r,i)=>{const prods=prodsUso().map(p=>p.nome); const lista=r.produto&&!prods.includes(r.produto)?[r.produto,...prods]:prods; return `<div class="rec">
       <label class="f sp">Produto<select id="r-${i}-p" data-r="${i}" data-k="produto">${opts(lista,r.produto,"Selecione o produto")}</select></label>
       <label class="f">Dose (${esc(r.unidade||"L")}/ha)<input id="r-${i}-d" class="mono" data-r="${i}" data-k="dose" inputmode="decimal" value="${esc(r.dose)}" placeholder="0,00"></label>
       <div class="cost" id="r-${i}-c">${temPreco(precosDe(d.clienteId))?brl(custoItem(r,precosDe(d.clienteId)))+"/ha":""}</div>
       <button class="ghost x" data-a="rm-rec" data-i="${i}" aria-label="Remover produto">✕</button>
     </div>`}).join("")}
-    <div class="row"><button data-a="add-rec">+ Adicionar produto</button>${S.produtos.length?"":`<span class="note">Cadastre os produtos em “Produtos” no topo.</span>`}</div>
+    <div class="row"><button data-a="add-rec">+ Adicionar produto</button>${prodsUso().length?"":`<span class="note">Cadastre os produtos em “Produtos” no topo.</span>`}</div>
     <div class="money" id="rec-tot">${recTotHtml()}</div>
     ${/drone/i.test(d.modalidade||"")?`<label class="f">Vazão do drone (L/ha)<input id="p-vazao" class="mono" data-vazao="1" inputmode="decimal" value="${esc(d.rec.vazao)}" placeholder="Ex.: 10"></label>`:""}
     <label class="f">Expectativa de controle<input id="p-expect" data-expect="1" value="${esc(d.rec.expectativa)}" placeholder="Ex.: 95% ou “alto nas moles; roço químico nas duras”"></label>
@@ -365,17 +365,31 @@ function vAjustes(){
   const d=S.draft, c=d.config;
   return `
   <div><button class="crumb" data-a="voltar-lista">← Clientes</button></div>
-  ${S.view.aba==="dados"?vDados(c):`<div><div class="eyebrow">Ajustes</div><h1>Produtos</h1></div>
+  ${S.view.aba==="dados"?vDados(c):S.view.aba==="novoprod"?vNovoProduto():vProdutos()}`;
+}
+function prodsUso(){ return S.produtos.filter(p=>!p.status||p.status==="aprovado"); }
+function vProdutos(){
+  const st={pendente:"Aguardando aprovação",rejeitado:"Rejeitado"};
+  const lista=[...S.produtos].sort((a,b)=>(a.status==="pendente"?0:1)-(b.status==="pendente"?0:1)||(a.nome||"").localeCompare(b.nome||"","pt"));
+  return `<div><div class="eyebrow">Ajustes</div><h1>Produtos</h1></div>
   <section class="card section">
-    <div class="row spread"><h2>Produtos</h2><span class="note">Lista usada nas recomendações. Os preços entram na proposta de cada cliente.</span></div>
-    <div>${d.produtos.map((p,i)=>`<div class="prod">
-      <label class="f sp">Produto<input id="pr-${i}-n" data-pr="${i}" data-k="nome" value="${esc(p.nome)}" placeholder="Nome comercial"></label>
-      <label class="f">Tipo<select id="pr-${i}-t" data-pr="${i}" data-k="tipo">${opts(TIPOS,p.tipo,"—")}</select></label>
-      <label class="f">Unid. da dose<select id="pr-${i}-u" data-pr="${i}" data-k="unidade">${opts(UNIDADES,p.unidade||"L","—")}</select></label>
-      <button class="ghost x" data-a="rm-prod" data-i="${i}" aria-label="Remover produto" style="min-height:42px">✕</button>
-    </div>`).join("")||`<p class="note">Nenhum produto cadastrado.</p>`}</div>
-    <div><button data-a="add-prod">+ Novo produto</button></div>
-  </section>`}`;
+    <div class="row spread"><h2>Lista de produtos</h2><span class="note">Usada nas recomendações. Os preços entram na proposta de cada cliente.</span></div>
+    <div class="row"><button class="primary" data-a="novo-produto">+ Novo produto</button></div>
+    <div class="prod-lista">${lista.map(p=>`<div class="prod-ro${p.status&&p.status!=="aprovado"?" st-"+esc(p.status):""}">
+      <div class="row spread"><b>${esc(p.nome)}</b>${st[p.status]?`<span class="pill st-${esc(p.status)}">${st[p.status]}</span>`:""}</div>
+      <div class="note">${[p.tipo,p.industria,window.principiosTexto?window.principiosTexto(p.principios):"",p.formulacao&&window.formulacaoTexto?window.formulacaoTexto(p.formulacao):"",p.volume?"Vendido em "+p.volume:"","Dose em "+(p.unidade||"L")+"/ha"].filter(Boolean).map(esc).join(" · ")}</div>
+      ${p.status==="rejeitado"&&p.motivo?`<div class="note">Motivo: ${esc(p.motivo)}</div>`:""}
+    </div>`).join("")||`<p class="note">Nenhum produto ainda.</p>`}</div>
+    <p class="note">Produtos novos só entram nas recomendações depois de aprovados pelo administrador.</p>
+  </section>`;
+}
+function vNovoProduto(){
+  return `<div><div class="eyebrow">Produtos</div><h1>Novo produto</h1></div>
+  <section class="card section" id="novoProdForm">
+    <p class="note">${window.__souAdmin?"Como dono, o produto entra já aprovado.":"O produto fica aguardando a aprovação do administrador antes de aparecer nas recomendações."}</p>
+    ${window.produtoFormHTML?window.produtoFormHTML({}):""}
+    <div class="row"><button class="primary" data-a="enviar-produto" ${S.busy?"disabled":""}>${S.busy?"Enviando…":window.__souAdmin?"Salvar produto":"Enviar para aprovação"}</button><button class="ghost" data-a="abrir-ajustes">Cancelar</button></div>
+  </section>`;
 }
 function vDados(c){
   return `<div><div class="eyebrow">Ajustes</div><h1>Dados</h1></div>
@@ -399,12 +413,6 @@ function vDados(c){
 async function salvarAjustes(){
   const d=S.draft; S.busy=true; bar(); let ok=true;
   try{
-    for(const id of d.removidos) await db.collection("produtos").doc(id).delete();
-    for(const p of d.produtos){ if(!String(p.nome||"").trim()) continue;
-      const data={nome:p.nome.trim(),tipo:p.tipo||"",unidade:p.unidade||"L"};
-      const old=S.produtos.find(x=>x.id===p.id);
-      if(old&&old.nome===data.nome&&old.tipo===data.tipo&&old.unidade===data.unidade) continue;
-      const ref=p.id?db.collection("produtos").doc(p.id):db.collection("produtos").doc(); await ref.set(data); p.id=ref.id; }
     const cf={empresa:d.config.empresa||"",responsavel:d.config.responsavel||"",registro:d.config.registro||"",telefone:d.config.telefone||"",email:d.config.email||""};
     if(JSON.stringify(cf)!==JSON.stringify({empresa:S.config.empresa||"",responsavel:S.config.responsavel||"",registro:S.config.registro||"",telefone:S.config.telefone||"",email:S.config.email||""})) { await db.doc("config/geral").set(cf); S.config=cf; }
     d.removidos=[]; S.dirty=false; toast("Ajustes salvos");
@@ -465,7 +473,7 @@ function bar(){
   if(S.pending){
     slot.innerHTML=`<div class="bar"><div class="bar-in"><span class="msg">Há alterações não salvas.</span><button data-a="descartar">Descartar</button><button class="primary" data-a="salvar-e-sair">Salvar</button></div></div>`; return;
   }
-  if(S.view.name==="ajustes"){
+  if(S.view.name==="ajustes"&&S.view.aba==="dados"){
     slot.innerHTML=`<div class="bar"><div class="bar-in"><span class="msg">${S.dirty?"Alterações não salvas":"Tudo salvo"}</span><button class="primary" data-a="salvar-ajustes" ${S.busy?"disabled":""}>${S.busy?"Salvando…":"Salvar"}</button></div></div>`; return;
   }
   if(S.view.name==="proposta"){
@@ -548,6 +556,18 @@ document.addEventListener("click", async e=>{
     case "voltar-lista": go({name:"lista"}); break;
     case "abrir-ajustes": go({name:"ajustes",aba:"produtos"}); break;
     case "abrir-dados": go({name:"ajustes",aba:"dados"}); break;
+    case "novo-produto": go({name:"ajustes",aba:"novoprod"}); break;
+    case "enviar-produto": {
+      const form=document.querySelector("#novoProdForm .prod-form"); if(!form) break;
+      const p=window.produtoFormLer(form); const erro=window.produtoFormValidar(p); if(erro){ toast(erro); break; }
+      if(S.produtos.some(x=>(x.nome||"").trim().toLowerCase()===p.nome.toLowerCase())){ toast("Já existe um produto com esse nome."); break; }
+      S.busy=true; render(); const vals=p;
+      try{
+        if(window.__enviarProduto) await window.__enviarProduto(vals);
+        else await db.collection("produtos").doc(window.produtoId(vals.nome)).set({...vals,status:"aprovado"});
+        S.busy=false; toast(window.__souAdmin||!window.__enviarProduto?"Produto salvo.":"Produto enviado para aprovação."); go({name:"ajustes",aba:"produtos"});
+      }catch(e){ S.busy=false; render(); const f=document.querySelector("#novoProdForm .prod-form"); if(f){ /* refaz o formulário com o que foi digitado */ f.outerHTML=window.produtoFormHTML(vals); } toast(e&&e.message||"Não foi possível enviar. Verifique a internet."); }
+      break; }
     case "exportar-backup": { try{ const dados=await window.__localdb._tudo(); const n=Object.values(dados).reduce((s,c)=>s+Object.keys(c).length,0);
         await downloads.save({filename:`backup-pasto-limpo-${today()}.json`,data:new Blob([JSON.stringify({app:"proposta-pasto-limpo",versao:1,exportadoEm:new Date().toISOString(),dados})],{type:"application/json"})}); toast(`Backup exportado (${n} registros)`); }catch(e){ toast("Não foi possível exportar o backup."); } break; }
     case "abrir-areas": go({name:"areas"}); break;
@@ -813,10 +833,10 @@ async function semearProdutos(){
   if(!window.claude?.use){ setSync("Modo offline",true); $app.innerHTML=`<div class="card empty"><b>Abra este app pelo link do Claude</b>Os dados ficam guardados online e só carregam dentro do Claude.</div>`; return; }
   db=await claude.use("db");
   if(!db){ setSync("Sem acesso",true); $app.innerHTML=`<div class="card empty"><b>Não foi possível acessar os dados</b>Entre na sua conta Claude e abra o link novamente.</div>`; return; }
-  semearProdutos();
+  if(!window.__nuvem) semearProdutos();
   claude.use("assets").then(a=>{ assets=a; if(S.view.name==="pasto") render(); });
   claude.use("downloads").then(x=>{ downloads=x; });
-  db.collection("produtos").onSnapshot(s=>{ S.produtos=s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.nome||"").localeCompare(b.nome||"","pt")); if(S.view.name==="ajustes"&&!S.dirty){ S.draft.produtos=S.produtos.map(p=>({...p})); render(); } else if(S.view.name==="pasto") { if(!document.activeElement||!document.activeElement.dataset.r) render(); } }, ()=>{});
+  db.collection("produtos").onSnapshot(s=>{ S.produtos=s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.nome||"").localeCompare(b.nome||"","pt")); if(S.view.name==="ajustes"&&S.view.aba==="novoprod"){} else if(S.view.name==="ajustes"&&!S.dirty){ S.draft.produtos=S.produtos.map(p=>({...p})); render(); } else if(S.view.name==="pasto") { if(!document.activeElement||!document.activeElement.dataset.r) render(); } }, ()=>{});
   db.collection("areas").onSnapshot(s=>{ S.biblio=s.docs.map(d=>({id:d.id,...d.data()})); if(S.view.name==="areas"&&!(document.activeElement&&document.activeElement.dataset.bib)) render(); else if(S.view.name==="pasto"&&S.picker) render(); }, ()=>{});
   db.doc("config/geral").onSnapshot(s=>{ S.config=s.exists?s.data():{}; }, ()=>{});
   const timer=setTimeout(()=>setSync("Sem resposta do servidor",true),10000);
