@@ -153,7 +153,7 @@ function vLista(){
     </button>`;}).join(""):`<div class="card empty"><b>${q?"Nenhum cliente encontrado":"Nenhum cliente ainda"}</b>${q?"Tente outro nome.":"Toque em “Novo cliente” para começar o primeiro levantamento."}</div>`}</div>`;
 }
 
-function relDe(c){ const b=(c&&c.rel)||{empresa:"",...S.config}; return {empresa:b.empresa||"",responsavel:b.responsavel||"",telefone:b.telefone||"",email:b.email||""}; }
+function relDe(c){ const b=(c&&c.rel)||{empresa:"",...S.config}; return {empresa:b.empresa||"",responsavel:b.responsavel||"",telefone:b.telefone||"",email:b.email||"",logo:S.config.logo||"",logoW:S.config.logoW||0,logoH:S.config.logoH||0}; }
 function vCliente(){
   const d=S.draft, isNew=!S.view.id, ps=isNew?[]:pastosDe(S.view.id);
   const ha=ps.reduce((s,p)=>s+(+p.areaHa||0),0);
@@ -403,6 +403,12 @@ function vDados(c){
       <label class="f">Telefone<input id="cf-tel" data-cf="telefone" value="${esc(c.telefone)}" inputmode="tel"></label>
       <label class="f">E-mail<input id="cf-mail" data-cf="email" value="${esc(c.email)}" inputmode="email"></label>
     </div>
+    <div class="logo-emp">
+      <b>Logo da empresa</b>
+      <p class="note">Aparece no canto superior direito do PDF, no lugar do nome do distribuidor. Sem logo, o PDF mostra o nome escrito.</p>
+      ${c.logo?`<div class="logo-prev"><img src="${c.logo}" alt="Logo da empresa"></div>`:""}
+      <div class="row"><label class="btn file-btn">${c.logo?"Trocar logo":"Enviar logo"}<input type="file" id="logo-emp" accept="image/png,image/jpeg,image/webp"></label>${c.logo?`<button class="ghost" data-a="rm-logo">Remover logo</button>`:""}</div>
+    </div>
   </section>
   <section class="card section">
     <h2>Backup dos dados</h2>
@@ -413,8 +419,8 @@ function vDados(c){
 async function salvarAjustes(){
   const d=S.draft; S.busy=true; bar(); let ok=true;
   try{
-    const cf={empresa:d.config.empresa||"",responsavel:d.config.responsavel||"",registro:d.config.registro||"",telefone:d.config.telefone||"",email:d.config.email||""};
-    if(JSON.stringify(cf)!==JSON.stringify({empresa:S.config.empresa||"",responsavel:S.config.responsavel||"",registro:S.config.registro||"",telefone:S.config.telefone||"",email:S.config.email||""})) { await db.doc("config/geral").set(cf); S.config=cf; }
+    const cf={empresa:d.config.empresa||"",responsavel:d.config.responsavel||"",registro:d.config.registro||"",telefone:d.config.telefone||"",email:d.config.email||"",logo:d.config.logo||"",logoW:d.config.logoW||0,logoH:d.config.logoH||0};
+    if(JSON.stringify(cf)!==JSON.stringify({empresa:S.config.empresa||"",responsavel:S.config.responsavel||"",registro:S.config.registro||"",telefone:S.config.telefone||"",email:S.config.email||"",logo:S.config.logo||"",logoW:S.config.logoW||0,logoH:S.config.logoH||0})) { await db.doc("config/geral").set(cf); S.config=cf; }
     d.removidos=[]; S.dirty=false; toast("Ajustes salvos");
   }catch(e){ ok=false; toast("Não foi possível salvar. Verifique a internet e tente de novo."); }
   S.busy=false; render(); return ok;
@@ -521,6 +527,15 @@ document.addEventListener("input", e=>{
 document.addEventListener("change", async e=>{
   const t=e.target;
   if(t.tagName==="SELECT"&&!t.dataset.bib) return; // tratado em input
+  if(t.id==="logo-emp"){
+    const f=t.files[0]; t.value=""; if(!f) return;
+    try{
+      const bmp=await createImageBitmap(f); const max=600, sc=Math.min(1,max/bmp.width,240/bmp.height);
+      const cv=document.createElement("canvas"); cv.width=Math.max(1,Math.round(bmp.width*sc)); cv.height=Math.max(1,Math.round(bmp.height*sc));
+      cv.getContext("2d").drawImage(bmp,0,0,cv.width,cv.height);
+      Object.assign(S.draft.config,{logo:cv.toDataURL("image/png"),logoW:cv.width,logoH:cv.height}); S.dirty=true; render(); toast("Logo carregada. Toque em Salvar.");
+    }catch(err){ toast("Não consegui ler essa imagem. Use PNG ou JPG."); }
+    return; }
   if(t.dataset.inc&&S.draft){ const ex=new Set(S.draft.excluir); t.checked?ex.delete(t.dataset.inc):ex.add(t.dataset.inc); S.draft.excluir=[...ex]; S.dirty=true; render(); return; }
   if(t.id==="bk-imp"){ const f=t.files[0]; t.value=""; if(!f) return;
     try{ const j=JSON.parse(await f.text()); if(!j||!j.dados) throw new Error("Arquivo não é um backup do app.");
@@ -556,6 +571,7 @@ document.addEventListener("click", async e=>{
     case "voltar-lista": go({name:"lista"}); break;
     case "abrir-ajustes": go({name:"ajustes",aba:"produtos"}); break;
     case "abrir-dados": go({name:"ajustes",aba:"dados"}); break;
+    case "rm-logo": Object.assign(S.draft.config,{logo:"",logoW:0,logoH:0}); S.dirty=true; render(); break;
     case "novo-produto": go({name:"ajustes",aba:"novoprod"}); break;
     case "enviar-produto": {
       const form=document.querySelector("#novoProdForm .prod-form"); if(!form) break;
@@ -687,7 +703,10 @@ async function gerarPdf(){
     let y=0;
     const feitos=new Set();
     const header=()=>{ const pg=doc.internal.getCurrentPageInfo().pageNumber; if(feitos.has(pg)) return; feitos.add(pg); doc.addImage(logo,"PNG",M,9,LW,LH); doc.setFont("helvetica","normal"); doc.setFontSize(8); doc.setTextColor(...MUT);
-      doc.text([cfg.empresa||"", `${c.nome||""} · Safra ${d.safra}`],W-M,12,{align:"right"}); doc.setDrawColor(...LINE); doc.setLineWidth(.3); doc.line(M,21,W-M,21); };
+      if(cfg.logo&&cfg.logoW&&cfg.logoH){ const bh=10, bw=45; const s=Math.min(bw/cfg.logoW,bh/cfg.logoH); const lw=cfg.logoW*s, lh=cfg.logoH*s;
+        try{ doc.addImage(cfg.logo,"PNG",W-M-lw,9.5+(bh-lh)/2,lw,lh); doc.text(`${c.nome||""} · Safra ${d.safra}`,W-M-lw-4,16,{align:"right"}); }
+        catch(e){ doc.text([cfg.empresa||"", `${c.nome||""} · Safra ${d.safra}`],W-M,12,{align:"right"}); } }
+      else doc.text([cfg.empresa||"", `${c.nome||""} · Safra ${d.safra}`],W-M,12,{align:"right"}); doc.setDrawColor(...LINE); doc.setLineWidth(.3); doc.line(M,21,W-M,21); };
     const novaPagina=()=>{ doc.addPage(); header(); y=28; };
     const precisa=h=>{ if(y+h>280) novaPagina(); };
     const h1=(t)=>{ precisa(16); doc.setFont("helvetica","bold"); doc.setFontSize(14); doc.setTextColor(...BLUE); doc.text(t,M,y+6); y+=11; };
