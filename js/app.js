@@ -6,7 +6,10 @@ const CLASSES = ["Mole","Mediana","Dura"];
 const ESTAGIOS = ["Plântula","Vegetativo jovem","Vegetativo adulto","Florescimento","Frutificação","Rebrota pós-roçada"];
 const INFEST = ["Baixa","Média","Alta"];
 const CONDICAO = ["Boa","Regular","Degradada","Em reforma"];
-const MODALIDADES = ["Drone","Trator","Drone e trator","Aérea (avião)","Costal / catação","Toco"];
+const MODALIDADES = ["Drone","Trator","Drone e trator","Aérea (avião)","Localizada – foliar (costal)","Localizada – toco"];
+const MOD_ANTIGA = {"Costal / catação":"Localizada – foliar (costal)","Toco":"Localizada – toco"};
+const ehLocal = m => /localizada|costal|cata[cç][aã]o|toco/i.test(m||"");
+const BOMBA = 20; // litros por bomba costal
 const ROCADA = ["Não","Sim, antes da aplicação","Sim, depois da aplicação"];
 const UNIDADES = ["L","kg","mL","g"];
 const TIPOS = ["Herbicida","Adjuvante","Outro"];
@@ -18,8 +21,14 @@ const decStr = v => v==null||v===""?"":String(v).replace(".",",");
 function volTot(itens){ const u={}; itens.forEach(i=>{ u[i.unidade]=(u[i.unidade]||0)+i.volume; }); return Object.entries(u).map(([k,v])=>`${fmtN(v,1)} ${k}`).join(" + ")||"0"; }
 const fator = u => (u==="g"||u==="mL")?0.001:1;            // dose em g ou mL, preço por kg ou L
 const uCompra = u => u==="g"?"kg":u==="mL"?"L":(u||"L");
-const custoItem = (i,pr) => (dec(i.dose)||0)*fator(i.unidade||"L")*(dec(pr?.[i.produto])||0);
-function recCusto(rec,pr){ return (rec?.itens||[]).reduce((s,i)=>s+custoItem(i,pr),0); }
+const custoItem = (i,pr) => (dec(i.dose)||0)*fator(i.unidade||"L")*(dec(pr?.[i.produto])||0);   // por ha, ou por bomba na aplicação localizada
+const custoBomba = (rec,pr) => (rec?.itens||[]).reduce((s,i)=>s+custoItem(i,pr),0);
+const bombasHa = rec => rec?.porBomba ? (dec(rec.bombasHa)||0) : 1;
+const doseHa = (i,rec) => (dec(i.dose)||0)*bombasHa(rec);                                     // dose por ha (na localizada: dose/bomba × bombas/ha)
+function recCusto(rec,pr){ return custoBomba(rec,pr)*bombasHa(rec); }                           // R$/ha (0 na localizada sem bombas/ha)
+const semEstimativa = rec => rec?.porBomba && !dec(rec.bombasHa);
+function custoHaTxt(rec,pr){ return semEstimativa(rec) ? brl(custoBomba(rec,pr))+"/bomba" : brl(recCusto(rec,pr)); }
+const unidBomba = u => (u==="kg"||u==="g") ? "g" : "mL";
 function precosDe(cid){ if(S.view.name==="proposta"&&S.view.id===cid&&S.draft?.precos) return S.draft.precos; return cliente(cid)?.proposta?.precos||{}; }
 const temPreco = pr => Object.values(pr||{}).some(v=>dec(v));
 function temRec(p){ return (p.rec?.itens||[]).some(i=>i.produto&&dec(i.dose)); }
@@ -123,8 +132,9 @@ function go(view){
   S.pending=null; S.dirty=false; S.armed=null; S.importing=null; S.picker=false;
   if(view.name==="cliente"){ const c=view.id?cliente(view.id):null; S.draft=c?clone(c):{nome:"",municipio:"",uf:"",contato:"",telefone:"",tecnico:"",obs:""}; S.draft.rel=relDe(c); }
   if(view.name==="pasto"){ const p=view.id?S.pastos.find(x=>x.id===view.id):null; S.draft=p?clone(p):{clienteId:view.clienteId,fazenda:view.fazenda||"",nome:"",areaHa:"",capim:"",condicao:"",modalidade:"",daninhas:[{nome:"",classe:"",estagio:"",infestacao:""}],riscoGC:"",riscoGCNota:"",rocada:"",rocadaNota:"",fotos:[],poligono:null,kml:"",obs:"",dataVisita:today()}; }
-  if(view.name==="pasto"){ S.draft.daninhas=S.draft.daninhas||[]; S.draft.fotos=S.draft.fotos||[]; if(!S.draft.daninhas.length) S.draft.daninhas.push({nome:"",classe:"",estagio:"",infestacao:""}); if(typeof S.draft.areaHa==="number") S.draft.areaHa=String(S.draft.areaHa).replace(".",","); S.draft.areas=clone(areasDe(S.draft)); delete S.draft.poligono; delete S.draft.kml; }
-  if(view.name==="pasto"){ const r=S.draft.rec||{}; S.draft.rec={itens:(r.itens||[]).map(i=>({produto:i.produto,produtoId:i.produtoId||"",unidade:i.unidade||"L",dose:decStr(i.dose)})),obs:r.obs||"",expectativa:r.expectativa||"",vazao:decStr(r.vazao)}; }
+  if(view.name==="pasto"){ S.draft.daninhas=S.draft.daninhas||[]; S.draft.fotos=S.draft.fotos||[]; if(!S.draft.daninhas.length) S.draft.daninhas.push({nome:"",classe:"",estagio:"",infestacao:""}); if(typeof S.draft.areaHa==="number") S.draft.areaHa=String(S.draft.areaHa).replace(".",","); S.draft.areas=clone(areasDe(S.draft)); delete S.draft.poligono; delete S.draft.kml; if(MOD_ANTIGA[S.draft.modalidade]) S.draft.modalidade=MOD_ANTIGA[S.draft.modalidade]; }
+  if(view.name==="pasto"){ const r=S.draft.rec||{}; S.draft.rec={itens:(r.itens||[]).map(i=>({produto:i.produto,produtoId:i.produtoId||"",unidade:i.unidade||"L",dose:decStr(i.dose)})),obs:r.obs||"",expectativa:r.expectativa||"",vazao:decStr(r.vazao),porBomba:!!r.porBomba,bombasHa:decStr(r.bombasHa)};
+    if(ehLocal(S.draft.modalidade)&&!S.draft.rec.porBomba&&!S.draft.rec.itens.some(i=>dec(i.dose))) ajustarModo(); }
   if(view.name==="ajustes"){ S.draft={config:{empresa:"",responsavel:"",registro:"",telefone:"",email:"",...S.config},produtos:S.produtos.map(p=>({...p})),removidos:[]}; }
   if(view.name==="proposta"){ const c=cliente(view.id)||{}; const pr=c.proposta||{};
     const precos={}; Object.entries(pr.precos||{}).forEach(([k,v])=>precos[k]=decStr(v));
@@ -212,7 +222,7 @@ function pastoItem(p){
     <span class="s">${esc(p.capim||"Capim não informado")}${dn.length?" · "+esc(dn.map(d=>d.nome.split(" | ")[0]).join(", ")):""}</span>
     <span class="chips">
       ${ok?`<span class="chip ok">Levantamento completo</span>`:`<span class="chip warn">Incompleto</span>`}
-      ${temRec(p)?`<span class="chip ok">${temPreco(precosDe(p.clienteId))?brl(recCusto(p.rec,precosDe(p.clienteId)))+"/ha":"Com recomendação"}</span>`:`<span class="chip">Sem recomendação</span>`}
+      ${temRec(p)?`<span class="chip ok">${temPreco(precosDe(p.clienteId))?custoHaTxt(p.rec,precosDe(p.clienteId))+(semEstimativa(p.rec)?"":"/ha"):"Com recomendação"}</span>`:`<span class="chip">Sem recomendação</span>`}
       ${p.riscoGC?`<span class="chip ${rc}">Guarda-chuva: ${esc(p.riscoGC)}</span>`:""}
       ${p.rocada&&p.rocada!=="Não"?`<span class="chip">Roçada</span>`:""}
       ${areasDe(p).length?`<span class="chip">Mapa${areasDe(p).length>1?` · ${areasDe(p).length} áreas`:""}</span>`:""}
@@ -297,12 +307,13 @@ function vPasto(){
     <div class="row spread"><h2>Recomendação</h2><span class="note">Os preços entram uma vez só, na proposta do cliente</span></div>
     ${d.rec.itens.map((r,i)=>{const prods=prodsUso().map(p=>p.nome); const lista=r.produto&&!prods.includes(r.produto)?[r.produto,...prods]:prods; return `<div class="rec">
       <label class="f sp">Produto<select id="r-${i}-p" data-r="${i}" data-k="produto">${opts(lista,r.produto,"Selecione o produto")}</select></label>
-      <label class="f">Dose (${esc(r.unidade||"L")}/ha)<input id="r-${i}-d" class="mono" data-r="${i}" data-k="dose" inputmode="decimal" value="${esc(r.dose)}" placeholder="0,00"></label>
-      <div class="cost" id="r-${i}-c">${temPreco(precosDe(d.clienteId))?brl(custoItem(r,precosDe(d.clienteId)))+"/ha":""}</div>
+      <label class="f">Dose (${esc(r.unidade||"L")}/${d.rec.porBomba?"bomba "+BOMBA+" L":"ha"})<input id="r-${i}-d" class="mono" data-r="${i}" data-k="dose" inputmode="decimal" value="${esc(r.dose)}" placeholder="0,00"></label>
+      <div class="cost" id="r-${i}-c">${temPreco(precosDe(d.clienteId))?brl(custoItem(r,precosDe(d.clienteId)))+(d.rec.porBomba?"/bomba":"/ha"):""}</div>
       <button class="ghost x" data-a="rm-rec" data-i="${i}" aria-label="Remover produto">✕</button>
     </div>`}).join("")}
     <div class="row"><button data-a="add-rec">+ Adicionar produto</button>${prodsUso().length?"":`<span class="note">Cadastre os produtos em “Produtos” no topo.</span>`}</div>
     <div class="money" id="rec-tot">${recTotHtml()}</div>
+    ${d.rec.porBomba?`<p class="note">Aplicação localizada: doses por bomba de ${BOMBA} litros.</p><label class="f">Bombas de ${BOMBA} L por hectare (estimativa, opcional)<input id="p-bombas" class="mono" data-bombas="1" inputmode="decimal" value="${esc(d.rec.bombasHa??"")}" placeholder="Ex.: 8"></label>`:""}
     ${/drone/i.test(d.modalidade||"")?`<label class="f">Vazão do drone (L/ha)<input id="p-vazao" class="mono" data-vazao="1" inputmode="decimal" value="${esc(d.rec.vazao)}" placeholder="Ex.: 10"></label>`:""}
     <label class="f">Expectativa de controle<input id="p-expect" data-expect="1" value="${esc(d.rec.expectativa)}" placeholder="Ex.: 95% ou “alto nas moles; roço químico nas duras”"></label>
     <label class="f">Observação técnica da recomendação<textarea id="p-recobs" data-recobs="1" placeholder="Ex.: controle nas pragas moles e medianas; roço químico nas pragas duras">${esc(d.rec.obs)}</textarea></label>
@@ -315,12 +326,19 @@ function vPasto(){
   ${isNew?"":`<div><button class="danger ${S.armed==="pasto"?"armed":""}" data-a="excluir-pasto">${S.armed==="pasto"?"Confirmar exclusão do pasto":"Excluir pasto"}</button></div>`}`;
 }
 
+function ajustarModo(){
+  const d=S.draft; d.rec=d.rec||{itens:[]}; const loc=ehLocal(d.modalidade);
+  if(loc&&!d.rec.porBomba){ d.rec.porBomba=true; d.rec.itens.forEach(i=>{ i.unidade=unidBomba(i.unidade); i.dose=""; }); }
+  else if(!loc&&d.rec.porBomba){ d.rec.porBomba=false; d.rec.itens.forEach(i=>{ const pp=S.produtos.find(x=>x.nome===i.produto); i.unidade=pp?.unidade||"L"; i.dose=""; }); }
+}
 function recTotHtml(){
   const d=S.draft; const ha=areaNum(d.areaHa)||0; const pr=precosDe(d.clienteId); const c=recCusto(d.rec,pr);
+  if(d.rec?.porBomba&&temPreco(pr)){ const cb=custoBomba(d.rec,pr), nb=dec(d.rec.bombasHa);
+    return `<div><b>${brl(cb)}</b><span>custo por bomba de ${BOMBA} L</span></div>`+(nb?`<div><b>${brl(cb*nb)}</b><span>custo por hectare (${fmtDose(nb)} bombas/ha)</span></div><div><b>${brl(cb*nb*ha)}</b><span>total do pasto (${fmtHa(ha)} ha)</span></div>`:`<div><span>Informe as bombas por hectare para calcular o custo por hectare e do pasto.</span></div>`); }
   if(!temPreco(pr)) return `<div><b>${fmtHa(ha)}</b><span>hectares</span></div><div><span>Custos aparecem depois que você informar os preços na proposta do cliente.</span></div>`;
   return `<div><b>${brl(c)}</b><span>custo por hectare</span></div><div><b>${fmtHa(ha)}</b><span>hectares</span></div><div><b>${brl(c*ha)}</b><span>total do pasto</span></div>`;
 }
-function updRec(){ const d=S.draft; d.rec.itens.forEach((r,i)=>{ const el=document.getElementById(`r-${i}-c`); if(el&&temPreco(precosDe(d.clienteId))) el.textContent=brl(custoItem(r,precosDe(d.clienteId)))+"/ha"; }); const t=document.getElementById("rec-tot"); if(t) t.innerHTML=recTotHtml(); }
+function updRec(){ const d=S.draft; d.rec.itens.forEach((r,i)=>{ const el=document.getElementById(`r-${i}-c`); if(el&&temPreco(precosDe(d.clienteId))) el.textContent=brl(custoItem(r,precosDe(d.clienteId)))+(d.rec.porBomba?"/bomba":"/ha"); }); const t=document.getElementById("rec-tot"); if(t) t.innerHTML=recTotHtml(); }
 
 /* ---------- biblioteca de áreas ---------- */
 const chaveArea = a => (a.nome||"").trim().toLowerCase()+"|"+(+a.areaHa||0).toFixed(2);
@@ -431,7 +449,7 @@ function propPastos(cid){ const ex=new Set(S.draft?.excluir||[]); return pastosD
 function resumo(lista,pr){
   const prods={}; let total=0, ha=0;
   lista.forEach(p=>{ const a=+p.areaHa||0; ha+=a; total+=recCusto(p.rec,pr)*a;
-    (p.rec?.itens||[]).filter(i=>i.produto&&dec(i.dose)).forEach(i=>{ const u=i.unidade||"L"; const k=i.produto+"|"+uCompra(u); const o=prods[k]||(prods[k]={produto:i.produto,unidade:uCompra(u),preco:dec(pr?.[i.produto])||0,volume:0}); o.volume+=(dec(i.dose)||0)*fator(u)*a; }); });
+    (p.rec?.itens||[]).filter(i=>i.produto&&dec(i.dose)).forEach(i=>{ const u=i.unidade||"L"; const k=i.produto+"|"+uCompra(u); const o=prods[k]||(prods[k]={produto:i.produto,unidade:uCompra(u),preco:dec(pr?.[i.produto])||0,volume:0}); o.volume+=doseHa(i,p.rec)*fator(u)*a; }); });
   const itens=Object.values(prods).sort((a,b)=>a.produto.localeCompare(b.produto,"pt"));
   return {itens,total,ha,medio:ha?total/ha:0};
 }
@@ -463,7 +481,7 @@ function vProposta(){
     <div class="tbl"><table><thead><tr><th></th><th>Fazenda / pasto</th><th class="r">Área (ha)</th><th class="r">R$/ha</th><th class="r">Total</th></tr></thead><tbody>
     ${rows.map(({p,inc})=>`<tr><td><input type="checkbox" data-inc="${p.id}" aria-label="Incluir ${esc(p.nome)}" ${inc?"checked":""} ${temRec(p)?"":"disabled"}></td>
       <td><button class="crumb" data-a="abrir-pasto" data-id="${p.id}" style="text-align:left;min-height:0">${esc(p.fazenda?p.fazenda+" · ":"")}${esc(p.nome)}</button>${temRec(p)?"":`<div class="note">Sem recomendação. Abra o pasto para preencher.</div>`}</td>
-      <td class="r">${fmtHa(p.areaHa)}</td><td class="r">${temRec(p)?brl(recCusto(p.rec,pr)):"—"}</td><td class="r">${temRec(p)?brl(recCusto(p.rec,pr)*(+p.areaHa||0)):"—"}</td></tr>`).join("")}
+      <td class="r">${fmtHa(p.areaHa)}</td><td class="r">${temRec(p)?custoHaTxt(p.rec,pr):"—"}</td><td class="r">${temRec(p)&&!semEstimativa(p.rec)?brl(recCusto(p.rec,pr)*(+p.areaHa||0)):"—"}</td></tr>`).join("")}
     </tbody><tfoot><tr><td></td><td>Total</td><td class="r">${fmtHa(rs.ha)}</td><td class="r">${brl(rs.medio)}</td><td class="r">${brl(rs.total)}</td></tr></tfoot></table></div>
   </section>
   ${relDe(cliente(S.view.id)).responsavel?"":`<p class="note">Dica: preencha o responsável técnico em “Dados que aparecem no relatório”, no cadastro do cliente, para ele sair na assinatura do PDF.</p>`}`;
@@ -508,10 +526,11 @@ document.addEventListener("input", e=>{
   if(t.id==="imp-faz"&&S.importing){ S.importing.fazenda=t.value; return; }
   if(t.id==="imp-nome"&&S.importing){ S.importing.nome=t.value; return; }
   if(!S.draft) return;
-  if(t.dataset.f){ S.draft[t.dataset.f]=t.dataset.f==="uf"?t.value.toUpperCase():t.value; S.dirty=true; bar(); if(t.dataset.f==="areaHa") updRec(); if(t.dataset.f==="modalidade") render(); }
+  if(t.dataset.f){ S.draft[t.dataset.f]=t.dataset.f==="uf"?t.value.toUpperCase():t.value; S.dirty=true; bar(); if(t.dataset.f==="areaHa") updRec(); if(t.dataset.f==="modalidade"){ ajustarModo(); render(); } }
   else if(t.dataset.r!=null){ const r=S.draft.rec.itens[+t.dataset.r]; r[t.dataset.k]=t.value;
-    if(t.dataset.k==="produto"){ const p=S.produtos.find(x=>x.nome===t.value); if(p){ r.unidade=p.unidade||"L"; r.produtoId=p.id; } S.dirty=true; render(); return; }
+    if(t.dataset.k==="produto"){ const p=S.produtos.find(x=>x.nome===t.value); if(p){ r.unidade=S.draft.rec.porBomba?unidBomba(p.unidade||"L"):(p.unidade||"L"); r.produtoId=p.id; } S.dirty=true; render(); return; }
     S.dirty=true; updRec(); bar(); }
+  else if(t.dataset.bombas){ S.draft.rec.bombasHa=t.value; S.dirty=true; updRec(); bar(); }
   else if(t.dataset.vazao){ S.draft.rec.vazao=t.value; S.dirty=true; bar(); }
   else if(t.dataset.expect){ S.draft.rec.expectativa=t.value; S.dirty=true; bar(); }
   else if(t.dataset.recobs){ S.draft.rec.obs=t.value; S.dirty=true; bar(); }
@@ -592,7 +611,7 @@ document.addEventListener("click", async e=>{
     case "excluir-area": if(S.armed!=="bib-"+b.dataset.id){ S.armed="bib-"+b.dataset.id; render(); break; } S.armed=null; await remove(db.collection("areas").doc(b.dataset.id),"Área excluída"); break;
     case "abrir-proposta": go({name:"proposta",id:b.dataset.id}); break;
     case "voltar-cliente-prop": go({name:"cliente",id:S.view.id}); break;
-    case "add-rec": S.draft.rec.itens.push({produto:"",dose:"",unidade:"L"}); S.dirty=true; render(); document.getElementById(`r-${S.draft.rec.itens.length-1}-p`)?.focus(); break;
+    case "add-rec": S.draft.rec.itens.push({produto:"",dose:"",unidade:S.draft.rec.porBomba?"mL":"L"}); S.dirty=true; render(); document.getElementById(`r-${S.draft.rec.itens.length-1}-p`)?.focus(); break;
     case "rm-rec": S.draft.rec.itens.splice(+b.dataset.i,1); S.dirty=true; render(); break;
     case "add-prod": S.draft.produtos.push({nome:"",tipo:"Herbicida",unidade:"L"}); S.dirty=true; render(); document.getElementById(`pr-${S.draft.produtos.length-1}-n`)?.focus(); break;
     case "rm-prod": { const [p]=S.draft.produtos.splice(+b.dataset.i,1); if(p?.id) S.draft.removidos.push(p.id); S.dirty=true; render(); break; }
@@ -645,10 +664,10 @@ async function salvarPasto(){
     daninhas:(d.daninhas||[]).filter(w=>w.nome&&w.nome.trim()).map(w=>({nome:w.nome.trim(),classe:w.classe||"",estagio:w.estagio||"",infestacao:w.infestacao||""})),
     riscoGC:d.riscoGC||"",riscoGCNota:d.riscoGCNota||"",rocada:d.rocada||"",rocadaNota:d.rocadaNota||"",fotos:(d.fotos||[]).map(f=>({id:f.id,url:f.url,legenda:f.legenda||""})),
     areas:(d.areas||[]).map(x=>({nome:x.nome||"",poligono:x.poligono,areaHa:x.areaHa,kml:x.kml||""})),poligono:null,kml:"",obs:d.obs||"",dataVisita:d.dataVisita||"",criadoEm:d.criadoEm||now,atualizadoEm:now,
-    rec:{itens:(d.rec?.itens||[]).filter(i=>i.produto).map(i=>({produto:i.produto,produtoId:i.produtoId||"",unidade:i.unidade||"L",dose:dec(i.dose)})),obs:d.rec?.obs||"",expectativa:(d.rec?.expectativa||"").trim(),vazao:/drone/i.test(d.modalidade||"")?dec(d.rec?.vazao):null}};
+    rec:{itens:(d.rec?.itens||[]).filter(i=>i.produto).map(i=>({produto:i.produto,produtoId:i.produtoId||"",unidade:i.unidade||"L",dose:dec(i.dose)})),obs:d.rec?.obs||"",expectativa:(d.rec?.expectativa||"").trim(),vazao:/drone/i.test(d.modalidade||"")?dec(d.rec?.vazao):null,porBomba:!!d.rec?.porBomba,bombasHa:d.rec?.porBomba?dec(d.rec?.bombasHa):null}};
   const ref=S.view.id?db.collection("pastos").doc(S.view.id):db.collection("pastos").doc();
   const ok=await write(ref,data,"Pasto salvo");
-  if(ok){ S.dirty=false; if(!S.view.id) S.view={name:"pasto",id:ref.id}; S.draft=clone({...data,id:ref.id}); if(typeof S.draft.areaHa==="number") S.draft.areaHa=String(S.draft.areaHa).replace(".",","); if(!S.draft.daninhas.length) S.draft.daninhas.push({nome:"",classe:"",estagio:"",infestacao:""}); S.draft.rec={itens:S.draft.rec.itens.map(i=>({...i,dose:decStr(i.dose)})),obs:S.draft.rec.obs,expectativa:S.draft.rec.expectativa||"",vazao:decStr(S.draft.rec.vazao)}; render(); }
+  if(ok){ S.dirty=false; if(!S.view.id) S.view={name:"pasto",id:ref.id}; S.draft=clone({...data,id:ref.id}); if(typeof S.draft.areaHa==="number") S.draft.areaHa=String(S.draft.areaHa).replace(".",","); if(!S.draft.daninhas.length) S.draft.daninhas.push({nome:"",classe:"",estagio:"",infestacao:""}); S.draft.rec={itens:S.draft.rec.itens.map(i=>({...i,dose:decStr(i.dose)})),obs:S.draft.rec.obs,expectativa:S.draft.rec.expectativa||"",vazao:decStr(S.draft.rec.vazao),porBomba:!!S.draft.rec.porBomba,bombasHa:decStr(S.draft.rec.bombasHa)}; render(); }
   return ok;
 }
 async function confirmarImport(){
@@ -747,7 +766,7 @@ async function gerarPdf(){
       const areas=areasDe(p); const mapa=mapaPng(areas.map(a=>a.poligono));
       { // mantém cabeçalho, dados, tabela de recomendação e observações do pasto na mesma página
         const twE=mapa?CW-61:CW; doc.setFontSize(8.8);
-        const kvE=[p.capim,p.condicao,p.modalidade,p.rec?.vazao?"x":"",p.rec?.expectativa,[p.riscoGC,p.riscoGCNota].filter(Boolean).join(" - "),[p.rocada,p.rocadaNota].filter(Boolean).join(" - "),(p.daninhas||[]).map(daninhaTxt).join("; "),fmtDate(p.dataVisita)].filter(Boolean)
+        const kvE=[p.capim,p.condicao,p.modalidade,p.rec?.vazao?"x":"",p.rec?.porBomba?"x":"",p.rec?.expectativa,[p.riscoGC,p.riscoGCNota].filter(Boolean).join(" - "),[p.rocada,p.rocadaNota].filter(Boolean).join(" - "),(p.daninhas||[]).map(daninhaTxt).join("; "),fmtDate(p.dataVisita)].filter(Boolean)
           .reduce((s,v)=>s+doc.splitTextToSize(String(v),twE-24).length*3.8+1.2,0);
         const nIt=(p.rec?.itens||[]).filter(i=>i.produto&&dec(i.dose)).length;
         const paraH=t=>t?doc.splitTextToSize(String(t),CW).length*(8.8*0.42+0.6)+1.5:0;
@@ -759,15 +778,16 @@ async function gerarPdf(){
       const y0=y; let tx=M, tw=CW;
       if(mapa){ doc.addImage(mapa,"JPEG",M,y,56,40); doc.setDrawColor(...LINE); doc.rect(M,y,56,40);
         const ct=centroid(areas.map(a=>a.poligono).flat()); doc.setFontSize(7); doc.setTextColor(...MUT); doc.text(`${ct[1].toFixed(5)}, ${ct[0].toFixed(5)}${areas.length>1?` · ${areas.length} áreas`:""}`,M,y+44); tx=M+61; tw=CW-61; }
-      const kv=[["Capim",p.capim],["Condição",p.condicao],["Modalidade",p.modalidade],["Vazão (drone)",p.rec?.vazao?fmtDose(p.rec.vazao)+" L/ha":""],["Expectativa",p.rec?.expectativa],["Guarda-chuva",[p.riscoGC,p.riscoGCNota].filter(Boolean).join(" - ")],["Roçada",[p.rocada,p.rocadaNota].filter(Boolean).join(" - ")],["Daninhas",(p.daninhas||[]).map(daninhaTxt).join("; ")],["Visita",fmtDate(p.dataVisita)]].filter(r=>r[1]);
+      const kv=[["Capim",p.capim],["Condição",p.condicao],["Modalidade",p.modalidade],["Vazão (drone)",p.rec?.vazao?fmtDose(p.rec.vazao)+" L/ha":""],["Bombas/ha",p.rec?.porBomba?(dec(p.rec.bombasHa)?fmtDose(p.rec.bombasHa)+` bombas de ${BOMBA} L/ha`:"não estimado"):""],["Expectativa",p.rec?.expectativa],["Guarda-chuva",[p.riscoGC,p.riscoGCNota].filter(Boolean).join(" - ")],["Roçada",[p.rocada,p.rocadaNota].filter(Boolean).join(" - ")],["Daninhas",(p.daninhas||[]).map(daninhaTxt).join("; ")],["Visita",fmtDate(p.dataVisita)]].filter(r=>r[1]);
       let yy=y; doc.setFontSize(8.8);
       kv.forEach(([k,v])=>{ doc.setFont("helvetica","bold"); doc.setTextColor(...MUT); doc.text(k,tx,yy+3.5); doc.setFont("helvetica","normal"); doc.setTextColor(...INK);
         const ls=doc.splitTextToSize(String(v),tw-24); doc.text(ls,tx+24,yy+3.5); yy+=ls.length*3.8+1.2; });
       y=Math.max(yy,mapa?y0+47:yy)+2;
       const ha=+p.areaHa||0;
-      tabela({head:[["Produto","Dose/ha","Volume total","Custo/ha"]],
-        body:(p.rec.itens||[]).filter(i=>i.produto&&dec(i.dose)).map(i=>[i.produto,`${fmtDose(i.dose)} ${i.unidade||"L"}`,`${fmtN(dec(i.dose)*fator(i.unidade||"L")*ha,1)} ${uCompra(i.unidade)}`,brl(custoItem(i,pr))]),
-        foot:[["Total do pasto","","",brl(recCusto(p.rec,pr))+"/ha"]],rowPageBreak:"avoid",
+      const pb=p.rec?.porBomba, nb=dec(p.rec?.bombasHa);
+      tabela({head:[["Produto",pb?`Dose/bomba ${BOMBA} L`:"Dose/ha","Volume total",pb?"Custo/bomba":"Custo/ha"]],
+        body:(p.rec.itens||[]).filter(i=>i.produto&&dec(i.dose)).map(i=>[i.produto,`${fmtDose(i.dose)} ${i.unidade||"L"}`,pb&&!nb?"—":`${fmtN(doseHa(i,p.rec)*fator(i.unidade||"L")*ha,1)} ${uCompra(i.unidade)}`,brl(custoItem(i,pr))]),
+        foot:pb?[["Custo por bomba","","",brl(custoBomba(p.rec,pr))]].concat(nb?[[`Custo por hectare (${fmtDose(nb)} bombas/ha)`,"","",brl(recCusto(p.rec,pr))+"/ha"]]:[]):[["Total do pasto","","",brl(recCusto(p.rec,pr))+"/ha"]],rowPageBreak:"avoid",
         columnStyles:{1:{halign:"right"},2:{halign:"right"},3:{halign:"right"}}});
       if(p.rec?.obs){ para("Observação técnica: "+p.rec.obs,8.8); }
       if(p.obs){ para("Observações de campo: "+p.obs,8.8,MUT); }
@@ -785,7 +805,7 @@ async function gerarPdf(){
     novaPagina(); h1("3. Proposta comercial");
     caixas([[["Investimento total",brl(rs.total),true],["Custo médio por hectare",brl(rs.medio)+"/ha",true],["Área total",fmtHa(rs.ha)+" ha"]]]);
     tabela({head:[["Fazenda / pasto","Área (ha)","Modalidade","Custo R$/ha","Total"]],
-      body:lista.map(p=>[`${p.fazenda?p.fazenda+" - ":""}${p.nome}`,fmtHa(p.areaHa),[p.modalidade||"-",p.rec?.vazao?fmtDose(p.rec.vazao)+" L/ha":""].filter(Boolean).join(" · "),brl(recCusto(p.rec,pr)),brl(recCusto(p.rec,pr)*(+p.areaHa||0))]),
+      body:lista.map(p=>[`${p.fazenda?p.fazenda+" - ":""}${p.nome}`,fmtHa(p.areaHa),[p.modalidade||"-",p.rec?.vazao?fmtDose(p.rec.vazao)+" L/ha":""].filter(Boolean).join(" · "),custoHaTxt(p.rec,pr),semEstimativa(p.rec)?"—":brl(recCusto(p.rec,pr)*(+p.areaHa||0))]),
       foot:[["Total",fmtHa(rs.ha),"",brl(rs.medio),brl(rs.total)]],
       columnStyles:{1:{halign:"right"},3:{halign:"right"},4:{halign:"right"}}});
     precisa(20); doc.setFont("helvetica","bold"); doc.setFontSize(10.5); doc.setTextColor(...INK); doc.text("Resumo de produtos",M,y+4); y+=7;
