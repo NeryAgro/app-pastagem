@@ -58,7 +58,9 @@
     if (/Password should be at least/i.test(m)) return "A senha precisa ter pelo menos 6 caracteres.";
     if (/email rate limit/i.test(m)) return "O servidor atingiu o limite de e-mails de confirmação por hora. Tente de novo mais tarde ou avise o administrador do app.";
     if (/rate limit|too many/i.test(m)) return "Muitas tentativas. Espere alguns minutos e tente de novo.";
-    if (/Failed to fetch|NetworkError|network/i.test(m)) return "Sem internet. Conecte e tente de novo.";
+    if (/Failed to fetch|NetworkError|network|Load failed/i.test(m)) return navigator.onLine
+      ? "Não consegui falar com o servidor do app. Se estiver numa rede de empresa (Wi-Fi corporativo ou VPN), tente pelos dados do celular. Se persistir, avise o administrador."
+      : "Sem internet. Conecte e tente de novo.";
     if (/valid email|invalid.*email/i.test(m)) return "Confira o e-mail digitado.";
     return m || "Algo deu errado. Tente de novo.";
   }
