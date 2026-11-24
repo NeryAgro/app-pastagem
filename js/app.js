@@ -372,6 +372,7 @@ function vAreas(){
   <div class="row spread"><div><div class="eyebrow">Biblioteca</div><h1>Áreas (KML)</h1></div>
     <label class="btn file-btn primary" style="background:var(--accent);color:var(--accent-ink);border-color:var(--accent)">Importar KML/KMZ<input type="file" id="kml-lib" multiple></label></div>
   <p class="note">Todo KML importado fica guardado aqui. No pasto, use “Escolher da biblioteca de áreas” para trazer a área com mapa e hectares.</p>
+  ${S.biblio.length?`<div class="row"><button class="danger ${S.armed==="bib-todas"?"armed":""}" data-a="apagar-biblioteca" ${S.busy?"disabled":""}>${S.busy==="bib"?"Apagando…":S.armed==="bib-todas"?`Confirmar: apagar as ${S.biblio.length} áreas`:`Apagar todas as áreas da biblioteca (${S.biblio.length})`}</button>${S.armed==="bib-todas"?`<span class="note">Os pastos não são afetados: as áreas já colocadas em pastos continuam neles.</span>`:""}</div>`:""}
   ${S.biblio.length>4?`<input type="search" id="qa" placeholder="Buscar por nome, descrição, cliente ou fazenda" value="${esc(S.qa)}" aria-label="Buscar área">`:""}
   <div class="list">${lista.length?lista.map(a=>`<div class="card lib">${polySvg([a.poligono])}<div class="body">
     <div class="hd"><b>${esc(a.nome)}</b><span>${fmtHa(a.areaHa)} ha</span></div>
@@ -596,7 +597,7 @@ document.addEventListener("click", async e=>{
   if(sb&&S.draft){ const f=sb.dataset.seg,v=sb.dataset.v; S.draft[f]=S.draft[f]===v?"":v; S.dirty=true; render(); return; }
   const b=e.target.closest("[data-a]"); if(!b) return;
   const a=b.dataset.a;
-  if(a!=="excluir-cliente"&&a!=="excluir-pasto"&&a!=="excluir-area") S.armed=null;
+  if(a!=="excluir-cliente"&&a!=="excluir-pasto"&&a!=="excluir-area"&&a!=="apagar-biblioteca") S.armed=null;
   switch(a){
     case "novo-cliente": go({name:"cliente"}); break;
     case "abrir-cliente": go({name:"cliente",id:b.dataset.id}); break;
@@ -621,6 +622,12 @@ document.addEventListener("click", async e=>{
     case "abrir-areas": go({name:"areas"}); break;
     case "toggle-picker": S.picker=!S.picker; S.qp=""; render(); break;
     case "usar-area": { const a=S.biblio.find(x=>x.id===b.dataset.id); if(a){ S.draft.areas.push({nome:a.nome,poligono:a.poligono,areaHa:a.areaHa,kml:a.arquivo||""}); somaAreas(); if(!S.draft.nome) S.draft.nome=a.nome; S.dirty=true; render(); toast(`${a.nome} adicionada: ${fmtHa(a.areaHa)} ha`); } break; }
+    case "apagar-biblioteca": {
+      if(S.armed!=="bib-todas"){ S.armed="bib-todas"; render(); break; }
+      S.armed=null; S.busy="bib"; render(); const ids=S.biblio.map(x=>x.id); let n=0;
+      try{ for(const id of ids){ await db.collection("areas").doc(id).delete(); n++; } toast(`${n} área${n===1?"":"s"} apagada${n===1?"":"s"} da biblioteca`); }
+      catch(e){ toast(`Apaguei ${n} de ${ids.length}. Tente de novo para terminar.`); }
+      S.busy=false; render(); break; }
     case "excluir-area": if(S.armed!=="bib-"+b.dataset.id){ S.armed="bib-"+b.dataset.id; render(); break; } S.armed=null; await remove(db.collection("areas").doc(b.dataset.id),"Área excluída"); break;
     case "abrir-proposta": go({name:"proposta",id:b.dataset.id}); break;
     case "voltar-cliente-prop": go({name:"cliente",id:S.view.id}); break;
