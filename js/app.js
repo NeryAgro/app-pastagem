@@ -897,5 +897,18 @@ async function semearProdutos(){
   db.collection("clientes").onSnapshot(s=>{ S.clientes=s.docs.map(d=>({id:d.id,...d.data()})); if(!s.metadata.fromCache){S.loaded.c=true;fresh();} if(S.view.name==="lista") render(); else if(S.view.name==="cliente"&&!S.dirty){ if(S.view.id){ const c=cliente(S.view.id); if(c) S.draft=clone(c); } render(); } else bar(); }, err=>{ clearTimeout(timer); setSync("Erro ao sincronizar",true); });
   db.collection("pastos").onSnapshot(s=>{ S.pastos=s.docs.map(d=>({id:d.id,...d.data()})); if(!s.metadata.fromCache){S.loaded.p=true;fresh();} if(S.view.name==="lista"||S.view.name==="cliente"&&!S.dirty||S.view.name==="proposta") render(); }, err=>{ clearTimeout(timer); setSync("Erro ao sincronizar",true); });
   render();
+  importarCompartilhados();
 })();
+async function importarCompartilhados(){
+  if(!/compartilhado=1/.test(location.search)||!("caches" in window)) return;
+  history.replaceState(null,"",location.pathname);
+  try{
+    const c=await caches.open("pl-compartilhados"); const reqs=await c.keys(); let itens=[], erros=[];
+    for(const r of reqs){ const resp=await c.match(r); const nome=decodeURIComponent(resp.headers.get("x-nome")||"arquivo");
+      try{ const f=new File([await resp.blob()],nome); (await readGeoFile(f)).forEach(i=>itens.push({...i,arquivo:nome})); }catch(err){ erros.push(err.message); }
+      await c.delete(r); }
+    if(itens.length){ const n=await guardarNaBiblioteca(itens); go({name:"areas"}); toast(n?`${n} área${n===1?"":"s"} recebida${n===1?"":"s"} e guardada${n===1?"":"s"} na biblioteca`:"Essas áreas já estavam na biblioteca"); }
+    else if(erros.length) toast(erros[0]);
+  }catch(e){ toast("Não consegui receber o arquivo compartilhado."); }
+}
 })();
