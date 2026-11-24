@@ -74,18 +74,31 @@ function parseKml(text){
       const desc=(pm.getElementsByTagNameNS("*","description")[0]?.textContent||"").replace(/<[^>]*>/g," ").replace(/\s+/g," ").trim();
       res.push({nome:name||`Área ${res.length+1}`, descricao:desc, poligono:ring, areaHa:+(ringArea(ring)/1e4).toFixed(2)});
     }
+    // alguns apps gravam a área como linha fechada (LineString) em vez de polígono
+    if(!pm.getElementsByTagNameNS("*","Polygon").length) for(const ls of Array.from(pm.getElementsByTagNameNS("*","LineString"))){
+      const co=ls.getElementsByTagNameNS("*","coordinates")[0]; if(!co) continue;
+      const pts=co.textContent.trim().split(/\s+/).map(t=>t.split(",").map(Number)).filter(p=>p.length>=2&&isFinite(p[0])&&isFinite(p[1]));
+      if(pts.length<4) continue; const f=pts[0], l=pts[pts.length-1]; if(Math.abs(f[0]-l[0])>1e-6||Math.abs(f[1]-l[1])>1e-6) continue;
+      const ring=cleanRing(pts.map(p=>[+p[0].toFixed(7),+p[1].toFixed(7)])); if(ring.length<3) continue;
+      res.push({nome:name||`Área ${res.length+1}`, descricao:"", poligono:ring, areaHa:+(ringArea(ring)/1e4).toFixed(2)});
+    }
   }
   if(!res.length) throw new Error("Nenhum polígono encontrado no arquivo. Exporte a área como KML ou KMZ no Field Area Measure.");
   return res;
 }
 async function readGeoFile(file){
-  if(/\.kmz$/i.test(file.name)){
+  // Não confia na extensão: arquivos vindos do WhatsApp, Drive ou "Arquivos" às vezes chegam renomeados.
+  const buf=new Uint8Array(await file.arrayBuffer());
+  if(!buf.length) throw new Error(`O arquivo "${file.name}" está vazio. Exporte de novo no Field Area Measure.`);
+  if(buf[0]===0x50&&buf[1]===0x4B){ // "PK" = arquivo compactado (KMZ)
     if(!window.JSZip) throw new Error("Não consegui abrir KMZ agora. Exporte em KML e tente de novo.");
-    const zip=await JSZip.loadAsync(file); const k=Object.keys(zip.files).find(n=>/\.kml$/i.test(n));
+    const zip=await JSZip.loadAsync(buf); const k=Object.keys(zip.files).find(n=>/\.kml$/i.test(n))||Object.keys(zip.files).find(n=>!zip.files[n].dir);
     if(!k) throw new Error("O KMZ não tem um arquivo KML dentro.");
     return parseKml(await zip.files[k].async("string"));
   }
-  return parseKml(await file.text());
+  const txt=new TextDecoder("utf-8").decode(buf).replace(/^\uFEFF/,"");
+  if(!/<kml[\s>]/i.test(txt.slice(0,4000))&&!/<Placemark/i.test(txt)) throw new Error(`"${file.name}" não é um arquivo KML ou KMZ. No Field Area Measure, exporte a área como KML ou KMZ.`);
+  return parseKml(txt);
 }
 function polySvg(list){
   list=(list||[]).filter(c=>c&&c.length>=3); if(!list.length) return "";
@@ -197,7 +210,7 @@ function vCliente(){
   ${isNew?"":(()=>{const ps2=pastosDe(S.view.id); const pr=precosDe(S.view.id); const rs=resumo(ps2.filter(temRec),pr); return `<section class="card prop-cta"><div class="money"><div><b>${ps2.filter(temRec).length} de ${ps2.length}</b><span>pastos com recomendação</span></div><div><b>${temPreco(pr)?brl(rs.total):"Sem preços"}</b><span>investimento</span></div></div><button class="primary" data-a="abrir-proposta" data-id="${S.view.id}">Proposta e PDF</button></section>`})()}
   ${isNew?`<p class="note">Depois de criar o cliente você cadastra os pastos, um a um ou importando o KML do Field Area Measure.</p>`:`
   <div class="row spread"><div class="tot"><div><b>${ps.length}</b><span>pastos</span></div><div><b>${fmtHa(ha)}</b><span>hectares</span></div><div><b>${fazendas.filter(f=>f!=="Sem fazenda").length}</b><span>fazendas</span></div></div>
-    <div class="row"><label class="btn file-btn">Importar KML/KMZ<input type="file" id="kml-cli" accept=".kml,.kmz,application/vnd.google-earth.kml+xml,application/vnd.google-earth.kmz" multiple></label>
+    <div class="row"><label class="btn file-btn">Importar KML/KMZ<input type="file" id="kml-cli" multiple></label>
     <button class="primary" data-a="novo-pasto">+ Novo pasto</button></div></div>
   ${imp?`<div class="inline">
     <h2>${imp.itens.length} área${imp.itens.length===1?"":"s"} encontrada${imp.itens.length===1?"":"s"} no arquivo</h2>
@@ -252,7 +265,7 @@ function vPasto(){
   </section>
 
   <section class="card section">
-    <div class="row spread"><h2>Mapa da área</h2><label class="btn file-btn">${areas.length?"+ Adicionar KML/KMZ":"Importar KML/KMZ"}<input type="file" id="kml-pasto" multiple accept=".kml,.kmz,application/vnd.google-earth.kml+xml,application/vnd.google-earth.kmz"></label></div>
+    <div class="row spread"><h2>Mapa da área</h2><label class="btn file-btn">${areas.length?"+ Adicionar KML/KMZ":"Importar KML/KMZ"}<input type="file" id="kml-pasto" multiple></label></div>
     <div><button data-a="toggle-picker">${S.picker?"Fechar biblioteca":"Escolher da biblioteca de áreas"}</button></div>
     ${S.picker?vPicker(d):""}
     ${areas.length?(()=>{const all=areas.map(x=>x.poligono).flat();const ct=centroid(all);const tot=areas.reduce((s,x)=>s+(+x.areaHa||0),0);return `<div class="map">${polySvg(areas.map(x=>x.poligono))}<dl class="kv">
@@ -357,7 +370,7 @@ function vAreas(){
   return `
   <div><button class="crumb" data-a="voltar-lista">← Clientes</button></div>
   <div class="row spread"><div><div class="eyebrow">Biblioteca</div><h1>Áreas (KML)</h1></div>
-    <label class="btn file-btn primary" style="background:var(--accent);color:var(--accent-ink);border-color:var(--accent)">Importar KML/KMZ<input type="file" id="kml-lib" multiple accept=".kml,.kmz,application/vnd.google-earth.kml+xml,application/vnd.google-earth.kmz"></label></div>
+    <label class="btn file-btn primary" style="background:var(--accent);color:var(--accent-ink);border-color:var(--accent)">Importar KML/KMZ<input type="file" id="kml-lib" multiple></label></div>
   <p class="note">Todo KML importado fica guardado aqui. No pasto, use “Escolher da biblioteca de áreas” para trazer a área com mapa e hectares.</p>
   ${S.biblio.length>4?`<input type="search" id="qa" placeholder="Buscar por nome, descrição, cliente ou fazenda" value="${esc(S.qa)}" aria-label="Buscar área">`:""}
   <div class="list">${lista.length?lista.map(a=>`<div class="card lib">${polySvg([a.poligono])}<div class="body">
