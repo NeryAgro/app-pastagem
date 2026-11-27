@@ -558,6 +558,15 @@ function draftPrevio(c){ const pv=c.previo||{};
   perfis.forEach(p=>{ if(!p.rec.itens.length) p.rec.itens.push({produto:"",dose:"",unidade:p.rec.porBomba?"mL":"L"}); });
   S.draft={clienteId:c.id,safra:pv.safra||safraAtual(),data:pv.data||today(),perfis,precos,mostrarPrecos:!!pv.mostrarPrecos,validade:pv.validade||"15 dias",pagamento:pv.pagamento||"",obsTec:pv.obsTec||"",obsCom:pv.obsCom||""};
   ativarPerfil(0); }
+// Volume total de cada produto somando todos os perfis (dose/ha × ha; na localizada precisa de bombas/ha).
+function volumesPrevio(perfis){ const m={}; let falta=[];
+  perfis.forEach((p,k)=>{ const ha=dec(p.ha)||0; const its=(p.rec?.itens||[]).filter(i=>i.produto&&dec(i.dose)); if(!its.length) return;
+    if(!ha||semEstimativa(p.rec)){ falta.push((p.nome||"").trim()||`Perfil ${k+1}`); return; }
+    its.forEach(i=>{ const u=uCompra(i.unidade||"L"), key=i.produto+"|"+u; (m[key]=m[key]||{produto:i.produto,unidade:u,volume:0}).volume+=doseHa(i,p.rec)*fator(i.unidade||"L")*ha; }); });
+  return {itens:Object.values(m).sort((a,b)=>a.produto.localeCompare(b.produto,"pt")),falta}; }
+function volumesHtml(){ const v=volumesPrevio(S.draft.perfis); if(!v.itens.length&&!v.falta.length) return "";
+  return `<h3 class="rs-sub">Volume total por produto</h3><div class="rs">${v.itens.map(i=>`<div class="rs-l rs-2"><span>${esc(i.produto)}</span><span class="mono">${fmtN(i.volume,1)} ${esc(i.unidade)}</span></div>`).join("")}</div>
+    ${v.falta.length?`<p class="note">Fora da soma (falta tamanho${v.falta.length&&S.draft.perfis.some(p=>semEstimativa(p.rec))?" ou bombas por ha":""}): ${esc(v.falta.join(", "))}.</p>`:""}`; }
 function previoTotHtml(){
   const d=S.draft, pr=d.precos, p=d.perfis[S.pi];
   if(!temPreco(pr)) return `<div><span>Informe os preços dos produtos (mais abaixo) para calcular o custo por hectare.</span></div>`;
@@ -575,7 +584,7 @@ function resumoHtml(){ const d=S.draft, pr=d.precos; const ls=d.perfis.map(p=>({
 function updPrevio(){ const d=S.draft, pr=d.precos;
   d.rec.itens.forEach((r,i)=>{ const el=document.getElementById(`r-${i}-c`); if(el) el.textContent=temPreco(pr)?brl(custoItem(r,pr))+(d.rec.porBomba?"/bomba":"/ha"):""; });
   const t=document.getElementById("rec-tot"); if(t) t.innerHTML=previoTotHtml();
-  const r=document.getElementById("pv-resumo"); if(r) r.innerHTML=resumoHtml(); }
+  const r=document.getElementById("pv-resumo"); if(r) r.innerHTML=resumoHtml()+volumesHtml(); }
 function addDaninhaDigitada(){ const el=document.getElementById("dn-novo"); const v=(el?.value||"").trim(); if(!v) return;
   const canon=DANINHAS.find(x=>window.chaveDaninha(x)===window.chaveDaninha(v)||x.split("|").some(p=>window.chaveDaninha(p)===window.chaveDaninha(v)))||v;
   if(!S.draft.daninhas.some(w=>w.nome===canon)) S.draft.daninhas.push({nome:canon}); S.dirty=true; render(); const n=document.getElementById("dn-novo"); if(n){ n.value=""; n.focus(); } }
@@ -637,7 +646,7 @@ function vPrevio(){
 
   <section class="card section">
     <h2>Custo por hectare de cada área</h2>
-    <div id="pv-resumo">${resumoHtml()}</div>
+    <div id="pv-resumo">${resumoHtml()}${volumesHtml()}</div>
   </section>
 
   <section class="card section">
@@ -748,6 +757,9 @@ async function gerarPdfPrevio(){
     para("Orçamento prévio, feito sem levantamento de campo. Doses e custos podem mudar depois da visita técnica.",8.5,MUT,"italic");
     [["Validade da proposta",pv.validade],["Condição de pagamento",pv.pagamento]].filter(r=>r[1]).forEach(([k,v])=>para(`${k}: ${v}`,9.5));
     if(pv.obsCom) para(pv.obsCom,9.5);
+    { const v=volumesPrevio(perfis); if(v.itens.length){ h2("Volume total por produto");
+        tabela({head:[["Produto",R("Volume total")]],body:v.itens.map(i=>[i.produto,R(`${fmtN(i.volume,1)} ${i.unidade}`)]),columnStyles:{1:{halign:"right",cellWidth:50}}});
+        if(v.falta.length) para("Fora da soma (sem tamanho ou sem bombas por ha): "+v.falta.join(", ")+".",8.5,MUT); } }
     if(pv.mostrarPrecos){ const ps=[]; perfis.forEach(p=>p.rec.itens.filter(i=>i.produto&&dec(i.dose)).forEach(i=>{ if(!ps.some(x=>x[0]===i.produto)) ps.push([i.produto,uCompra(i.unidade||"L"),dec(pr[i.produto])]); }));
       h2("Preço dos produtos");
       tabela({head:[["Produto",R("Preço")]],body:ps.map(([p,u,v])=>[p,v?`${brl(v)}/${u}`:"—"]),columnStyles:{1:{halign:"right",cellWidth:62}}}); }
@@ -825,7 +837,7 @@ document.addEventListener("input", e=>{
   else if(t.dataset.preco!=null){ S.draft.precos[t.dataset.preco]=t.value; S.dirty=true; if(S.view.name==="previo"){ updPrevio(); bar(); } else render(); }
   else if(t.dataset.pp){ S.draft[t.dataset.pp]=t.value; S.dirty=true; bar(); }
   else if(t.dataset.perfil!=null){ const pf=S.draft.perfis[+t.dataset.perfil]; pf[t.dataset.k]=t.value; S.dirty=true;
-    if(t.dataset.k==="modalidade"){ ajustarModo(pf); S.draft.modalidade=pf.modalidade; render(); } else { bar(); const r=document.getElementById("pv-resumo"); if(r) r.innerHTML=resumoHtml(); } }
+    if(t.dataset.k==="modalidade"){ ajustarModo(pf); S.draft.modalidade=pf.modalidade; render(); } else { bar(); const r=document.getElementById("pv-resumo"); if(r) r.innerHTML=resumoHtml()+volumesHtml(); } }
   else if(t.dataset.w!=null){ S.draft.daninhas[+t.dataset.w][t.dataset.k]=t.value; S.dirty=true; bar(); }
   else if(t.dataset.area!=null){ S.draft.areas[+t.dataset.area].nome=t.value; S.dirty=true; bar(); }
   else if(t.dataset.foto!=null){ S.draft.fotos[+t.dataset.foto].legenda=t.value; S.dirty=true; bar(); }
