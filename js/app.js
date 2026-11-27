@@ -147,7 +147,7 @@ function go(view){
   if(view.name==="previo"){ draftPrevio(cliente(view.id)||{id:view.id}); }
   if(view.name==="pasto"){ const p=view.id?S.pastos.find(x=>x.id===view.id):null; S.draft=p?clone(p):{clienteId:view.clienteId,fazenda:view.fazenda||"",nome:"",areaHa:"",capim:"",condicao:"",modalidade:"",daninhas:[{nome:"",classe:"",estagio:"",infestacao:""}],riscoGC:"",riscoGCNota:"",rocada:"",rocadaNota:"",fotos:[],poligono:null,kml:"",obs:"",dataVisita:today()}; }
   if(view.name==="pasto"){ S.draft.daninhas=S.draft.daninhas||[]; S.draft.fotos=S.draft.fotos||[]; if(!S.draft.daninhas.length) S.draft.daninhas.push({nome:"",classe:"",estagio:"",infestacao:""}); if(typeof S.draft.areaHa==="number") S.draft.areaHa=String(S.draft.areaHa).replace(".",","); S.draft.areas=clone(areasDe(S.draft)); delete S.draft.poligono; delete S.draft.kml; if(MOD_ANTIGA[S.draft.modalidade]) S.draft.modalidade=MOD_ANTIGA[S.draft.modalidade]; }
-  if(view.name==="pasto"){ const r=S.draft.rec||{}; S.draft.rec={itens:(r.itens||[]).map(i=>({produto:i.produto,produtoId:i.produtoId||"",unidade:i.unidade||"L",dose:decStr(i.dose)})),obs:r.obs||"",expectativa:r.expectativa||"",vazao:decStr(r.vazao),porBomba:!!r.porBomba,bombasHa:decStr(r.bombasHa)};
+  if(view.name==="pasto"){ S.dnCat=false; S.qd=""; const r=S.draft.rec||{}; S.draft.rec={itens:(r.itens||[]).map(i=>({produto:i.produto,produtoId:i.produtoId||"",unidade:i.unidade||"L",dose:decStr(i.dose)})),obs:r.obs||"",expectativa:r.expectativa||"",vazao:decStr(r.vazao),porBomba:!!r.porBomba,bombasHa:decStr(r.bombasHa)};
     if(ehLocal(S.draft.modalidade)&&!S.draft.rec.porBomba&&!S.draft.rec.itens.some(i=>dec(i.dose))) ajustarModo(); }
   if(view.name==="ajustes"){ S.draft={config:{empresa:"",responsavel:"",registro:"",telefone:"",email:"",...S.config},produtos:S.produtos.map(p=>({...p})),removidos:[]}; }
   if(view.name==="proposta"){ const c=cliente(view.id)||{}; const pr=c.proposta||{};
@@ -299,14 +299,15 @@ function vPasto(){
 
   <section class="card section">
     <div class="row spread"><h2>Plantas daninhas</h2><span class="note">Lista do catálogo, ou digite outro nome</span></div>
-    ${(d.daninhas||[]).map((w,i)=>`<div class="weed">
-      <label class="f sp">Espécie<input id="w-${i}-n" data-w="${i}" data-k="nome" list="dl-daninhas" value="${esc(w.nome)}" placeholder="Ex.: Assa-peixe-branco"></label>
+    ${(d.daninhas||[]).map((w,i)=>{ const f=fotoDn(w.nome); return `<div class="weed">
+      <label class="f sp ${f?"com-foto":""}">Espécie${f?`<img class="dn-mini" src="${esc(f.thumb)}" alt="">`:""}<input id="w-${i}-n" data-w="${i}" data-k="nome" list="dl-daninhas" value="${esc(w.nome)}" placeholder="Ex.: Assa-peixe-branco"></label>
       <label class="f">Classe<select id="w-${i}-c" data-w="${i}" data-k="classe">${opts(CLASSES,w.classe,"—")}</select></label>
       <label class="f">Estágio<select id="w-${i}-e" data-w="${i}" data-k="estagio">${opts(ESTAGIOS,w.estagio,"—")}</select></label>
       <label class="f">Infestação<select id="w-${i}-i" data-w="${i}" data-k="infestacao">${opts(INFEST,w.infestacao,"—")}</select></label>
       <button class="ghost x" data-a="rm-weed" data-i="${i}" aria-label="Remover espécie">✕</button>
-    </div>`).join("")}
-    <div><button data-a="add-weed">+ Adicionar espécie</button></div>
+    </div>`; }).join("")}
+    <div class="row"><button data-a="add-weed">+ Adicionar espécie</button><button data-a="dn-catalogo">${S.dnCat?"Fechar catálogo":"Escolher no catálogo com fotos"}</button></div>
+    ${S.dnCat?catalogoHtml():""}
   </section>
 
   <section class="card section">
@@ -588,6 +589,9 @@ function updPrevio(){ const d=S.draft, pr=d.precos;
 function addDaninhaDigitada(){ const el=document.getElementById("dn-novo"); const v=(el?.value||"").trim(); if(!v) return;
   const canon=DANINHAS.find(x=>window.chaveDaninha(x)===window.chaveDaninha(v)||x.split("|").some(p=>window.chaveDaninha(p)===window.chaveDaninha(v)))||v;
   if(!S.draft.daninhas.some(w=>w.nome===canon)) S.draft.daninhas.push({nome:canon}); S.dirty=true; render(); const n=document.getElementById("dn-novo"); if(n){ n.value=""; n.focus(); } }
+function catalogoHtml(){ const sel=new Set((S.draft.daninhas||[]).map(w=>w.nome)); const q=window.chaveDaninha(S.qd||""); const cat=DANINHAS.filter(n=>!q||window.chaveDaninha(n).includes(q));
+  return `<div class="inline"><input type="search" id="qd" placeholder="Buscar planta" value="${esc(S.qd)}" aria-label="Buscar planta no catálogo">
+    <div class="dn-grid">${cat.map(n=>{ const f=fotoDn(n); return `<button type="button" class="dn-op" data-a="dn-toggle" data-v="${esc(n)}" aria-pressed="${sel.has(n)}">${f?`<img src="${esc(f.thumb)}" alt="" loading="lazy">`:`<span class="dn-sem">Sem foto</span>`}<span>${esc(n.split(" | ")[0])}</span></button>`; }).join("")||`<p class="note">Nenhuma planta com esse nome.</p>`}</div></div>`; }
 function vPrevio(){
   const c=cliente(S.view.id)||{}, d=S.draft, pr=d.precos, p=d.perfis[S.pi], i0=S.pi;
   const sel=new Set(d.daninhas.map(w=>w.nome)); const nFotos=Object.keys(S.fotosDn||{}).length;
@@ -838,7 +842,7 @@ document.addEventListener("input", e=>{
   else if(t.dataset.pp){ S.draft[t.dataset.pp]=t.value; S.dirty=true; bar(); }
   else if(t.dataset.perfil!=null){ const pf=S.draft.perfis[+t.dataset.perfil]; pf[t.dataset.k]=t.value; S.dirty=true;
     if(t.dataset.k==="modalidade"){ ajustarModo(pf); S.draft.modalidade=pf.modalidade; render(); } else { bar(); const r=document.getElementById("pv-resumo"); if(r) r.innerHTML=resumoHtml()+volumesHtml(); } }
-  else if(t.dataset.w!=null){ S.draft.daninhas[+t.dataset.w][t.dataset.k]=t.value; S.dirty=true; bar(); }
+  else if(t.dataset.w!=null){ const w=S.draft.daninhas[+t.dataset.w]; const antes=t.dataset.k==="nome"&&fotoDn(w.nome); w[t.dataset.k]=t.value; S.dirty=true; if(t.dataset.k==="nome"&&antes!==fotoDn(t.value)) render(); else bar(); }
   else if(t.dataset.area!=null){ S.draft.areas[+t.dataset.area].nome=t.value; S.dirty=true; bar(); }
   else if(t.dataset.foto!=null){ S.draft.fotos[+t.dataset.foto].legenda=t.value; S.dirty=true; bar(); }
 });
@@ -892,7 +896,7 @@ document.addEventListener("click", async e=>{
     case "abrir-previo": go({name:"previo",id:b.dataset.id}); break;
     case "voltar-cliente-previo": go({name:"cliente",id:S.view.id}); break;
     case "dn-catalogo": S.dnCat=!S.dnCat; S.qd=""; render(); break;
-    case "dn-toggle": { const v=b.dataset.v; const i=S.draft.daninhas.findIndex(w=>w.nome===v); if(i>=0) S.draft.daninhas.splice(i,1); else S.draft.daninhas.push({nome:v}); S.dirty=true; render(); break; }
+    case "dn-toggle": { const v=b.dataset.v; const i=S.draft.daninhas.findIndex(w=>w.nome===v); if(i>=0) S.draft.daninhas.splice(i,1); else if(S.view.name==="pasto"){ const vazio=S.draft.daninhas.findIndex(w=>!w.nome); if(vazio>=0) S.draft.daninhas[vazio].nome=v; else S.draft.daninhas.push({nome:v,classe:"",estagio:"",infestacao:""}); } else S.draft.daninhas.push({nome:v}); S.dirty=true; render(); break; }
     case "dn-add": addDaninhaDigitada(); break;
     case "add-perfil": S.draft.perfis.push(novoPerfil()); ativarPerfil(S.draft.perfis.length-1); S.dirty=true; render(); document.getElementById("pf-n")?.focus(); document.querySelector(".perfil-ed")?.scrollIntoView({block:"start"}); break;
     case "ir-perfil": ativarPerfil(+b.dataset.i); render(); break;
@@ -1113,6 +1117,14 @@ async function gerarPdf(){
         columnStyles:{1:{halign:"right"},2:{halign:"right"},3:{halign:"right"}}});
       if(p.rec?.obs){ para("Observação técnica: "+p.rec.obs,8.8); }
       if(p.obs){ para("Observações de campo: "+p.obs,8.8,MUT); }
+      { const dn=[]; for(const w of (p.daninhas||[]).filter(w=>w.nome)){ const f=fotoDn(w.nome); if(f){ const im=await fotoJpeg(f.foto); if(im) dn.push({nome:w.nome.split(" | ")[0],cientifico:f.cientifico,...im}); } }
+        if(dn.length){ const cols=6, gap=3, fw=(CW-gap*(cols-1))/cols, fh=fw*0.78, ch=fh+8;
+          dn.forEach((im,i)=>{ const col=i%cols; if(col===0){ if(i) y+=ch+2; precisa(ch); }
+            const x=M+col*(fw+gap); const r=Math.min(fw/im.w,fh/im.h), iw=im.w*r, ih=im.h*r;
+            doc.setFillColor(240,242,238); doc.rect(x,y,fw,fh,"F"); doc.addImage(im.data,"JPEG",x+(fw-iw)/2,y+(fh-ih)/2,iw,ih);
+            doc.setFont("helvetica","bold"); doc.setFontSize(7); doc.setTextColor(...INK); doc.text(doc.splitTextToSize(im.nome,fw)[0],x,y+fh+3.2);
+            if(im.cientifico){ doc.setFont("helvetica","italic"); doc.setFontSize(6.2); doc.setTextColor(...MUT); doc.text(doc.splitTextToSize(im.cientifico,fw)[0],x,y+fh+6.2); } });
+          y+=ch+4; } }
       const fotos=(p.fotos||[]).slice(0,3);
       if(fotos.length){ const imgs=[]; for(const f of fotos){ const im=await fotoJpeg(f.url); if(im) imgs.push({...im,legenda:f.legenda}); }
         if(imgs.length){ const fw=(CW-8)/3, fh=fw*0.75; precisa(fh+9);
@@ -1200,7 +1212,7 @@ async function semearProdutos(){
   claude.use("downloads").then(x=>{ downloads=x; });
   db.collection("produtos").onSnapshot(s=>{ S.produtos=s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.nome||"").localeCompare(b.nome||"","pt")); if(S.view.name==="ajustes"&&S.view.aba==="novoprod"){} else if(S.view.name==="ajustes"&&!S.dirty){ S.draft.produtos=S.produtos.map(p=>({...p})); render(); } else if(S.view.name==="pasto") { if(!document.activeElement||!document.activeElement.dataset.r) render(); } }, ()=>{});
   db.collection("areas").onSnapshot(s=>{ S.biblio=s.docs.map(d=>({id:d.id,...d.data()})); if(S.view.name==="areas"&&!(document.activeElement&&document.activeElement.dataset.bib)) render(); else if(S.view.name==="pasto"&&S.picker) render(); }, ()=>{});
-  db.collection("_daninhas").onSnapshot(s=>{ const m={}; s.docs.forEach(d=>m[d.id]=d.data()); S.fotosDn=m; if(S.view.name==="previo") render(); }, ()=>{});
+  db.collection("_daninhas").onSnapshot(s=>{ const m={}; s.docs.forEach(d=>m[d.id]=d.data()); S.fotosDn=m; if(S.view.name==="previo"||S.view.name==="pasto") render(); }, ()=>{});
   db.doc("config/geral").onSnapshot(s=>{ S.config=s.exists?s.data():{}; }, ()=>{});
   const timer=setTimeout(()=>setSync("Sem resposta do servidor",true),10000);
   const fresh=()=>{ if(S.loaded.c&&S.loaded.p){ clearTimeout(timer); setSync("Salvo no aparelho"); } };

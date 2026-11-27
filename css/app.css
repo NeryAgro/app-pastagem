@@ -238,3 +238,6 @@ label.check input{width:22px;height:22px;min-height:0;flex:none;accent-color:var
 .rs-t small{display:block;font-size:11px;color:var(--muted);font-weight:500}
 .rs-2{grid-template-columns:minmax(0,1fr) auto}
 h3.rs-sub{font-family:var(--f-display);font-size:15px;margin:16px 0 0}
+.weed label.com-foto{position:relative}
+.weed label.com-foto input{padding-right:56px}
+.weed .dn-mini{position:absolute;right:4px;bottom:4px;width:44px;height:34px;object-fit:cover;border-radius:5px;border:1px solid var(--line)}

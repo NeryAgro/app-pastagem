@@ -1,5 +1,5 @@
 // Service worker: guarda o app no aparelho para funcionar sem internet.
-const VERSAO = "aep-v20";
+const VERSAO = "aep-v21";
 const ARQUIVOS = [
   "./", "index.html", "manifest.webmanifest", "css/app.css",
   "js/logo.js", "js/config.js", "js/auth.js", "js/painel-dados.js", "js/produtos.js", "js/vendor/supabase.js", "js/store-local.js", "js/app.js",
