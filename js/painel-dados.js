@@ -58,7 +58,7 @@
     const CLI = [["Usuário", "Empresa do usuário", "Tipo", "Cliente", "Município", "UF", "Contato", "Telefone", "Nº de pastos", "Área total (ha)", "Safra da proposta", "Investimento estimado (R$)", "Custo médio (R$/ha)", "Observações"]];
     const PAS = [["Usuário", "Cliente", "Fazenda", "Pasto", "Área (ha)", "Capim", "Condição", "Modalidade", "Vazão (L/ha)", "Plantas daninhas", "Risco guarda-chuva", "Roçada", "Expectativa de controle", "Bombas 20 L/ha", "Data da visita", "Nº de KMLs", "Observações"]];
     const REC = [["Usuário", "Cliente", "Fazenda", "Pasto", "Área (ha)", "Produto", "Dose/ha", "Unidade da dose", "Preço (R$ por kg/L)", "Custo (R$/ha)", "Custo no pasto (R$)", "Volume no pasto (kg/L)", "Custo por bomba 20 L (R$)"]];
-    const PRV = [["Usuário", "Cliente", "Município", "UF", "Safra", "Data", "Modalidade", "Plantas daninhas", "Produto", "Dose", "Unidade da dose", "Preço (R$ por kg/L)", "Custo (R$/ha)", "Custo total do orçamento (R$/ha)", "Bombas 20 L/ha", "Expectativa de controle"]];
+    const PRV = [["Usuário", "Cliente", "Município", "UF", "Safra", "Data", "Perfil de área / pasto", "Tamanho (ha)", "Modalidade", "Plantas daninhas", "Produto", "Dose", "Unidade da dose", "Preço (R$ por kg/L)", "Custo (R$/ha)", "Custo do perfil (R$/ha)", "Bombas 20 L/ha", "Expectativa de controle"]];
     const PDF = [["Usuário", "Cliente", "Arquivo", "Gerado em", "Safra", "Pastos", "Área (ha)", "Investimento (R$)"]];
     for (const [uid, u] of Object.entries(por)) {
       for (const [cid, c] of Object.entries(u.clientes)) {
@@ -79,12 +79,16 @@
           PAS.push([nomeU(uid), c.nome || "", p.fazenda || "", p.nome || "", a, p.capim || "", p.condicao || "", p.modalidade || "", dec(rec.vazao) || "", (p.daninhas || []).filter(w => w && w.nome).map(w => [w.nome.split(" | ")[0], w.classe, w.estagio, w.infestacao].filter(Boolean).join(" / ")).join("; "), p.riscoGC || "", p.rocada || "", rec.expectativa || "", rec.porBomba ? (dec(rec.bombasHa) || "não estimado") : "", fmtD(p.dataVisita), areasDoPasto(p).length, p.obs || ""]);
         }
         if (c.previo) {
-          const pv = c.previo, rec = pv.rec || {}, ppr = pv.precos || {}, pb = !!rec.porBomba, nb = pb ? (dec(rec.bombasHa) || 0) : 1;
-          const itens = (rec.itens || []).filter(i => i.produto);
-          const totHa = itens.reduce((s, i) => s + (dec(i.dose) || 0) * fator(i.unidade || "L") * (dec(ppr[i.produto]) || 0) * nb, 0);
-          const dn = (pv.daninhas || []).map(w => w.nome.split(" | ")[0]).join("; ");
-          (itens.length ? itens : [{}]).forEach(i => { const dose = dec(i.dose) || 0, preco = dec(ppr[i.produto]) || 0, ch = dose * fator(i.unidade || "L") * preco * nb;
-            PRV.push([nomeU(uid), c.nome || "", c.municipio || "", c.uf || "", pv.safra || "", fmtD(pv.data), pv.modalidade || "", dn, i.produto || "", i.produto ? dose : "", i.produto ? (i.unidade || "L") + (pb ? "/bomba 20 L" : "/ha") : "", preco || "", ch ? +ch.toFixed(2) : "", totHa ? +totHa.toFixed(2) : "", pb ? (dec(rec.bombasHa) || "não estimado") : "", rec.expectativa || ""]); });
+          const pv = c.previo, ppr = pv.precos || {};
+          const pfs = (pv.perfis || []).some(x => x && x.rec) ? pv.perfis : [{ nome: ((pv.perfis || [])[0] || {}).nome || "", ha: ((pv.perfis || [])[0] || {}).ha, modalidade: pv.modalidade, daninhas: pv.daninhas, rec: pv.rec }];
+          for (const pf of pfs) {
+            const rec = pf.rec || {}, pb = !!rec.porBomba, nb = pb ? (dec(rec.bombasHa) || 0) : 1;
+            const itens = (rec.itens || []).filter(i => i.produto);
+            const totHa = itens.reduce((s, i) => s + (dec(i.dose) || 0) * fator(i.unidade || "L") * (dec(ppr[i.produto]) || 0) * nb, 0);
+            const dn = (pf.daninhas || []).map(w => w.nome.split(" | ")[0]).join("; ");
+            (itens.length ? itens : [{}]).forEach(i => { const dose = dec(i.dose) || 0, preco = dec(ppr[i.produto]) || 0, ch = dose * fator(i.unidade || "L") * preco * nb;
+              PRV.push([nomeU(uid), c.nome || "", c.municipio || "", c.uf || "", pv.safra || "", fmtD(pv.data), pf.nome || "", dec(pf.ha) || "", pf.modalidade || "", dn, i.produto || "", i.produto ? dose : "", i.produto ? (i.unidade || "L") + (pb ? "/bomba 20 L" : "/ha") : "", preco || "", ch ? +ch.toFixed(2) : "", totHa ? +totHa.toFixed(2) : "", pb ? (dec(rec.bombasHa) || "não estimado") : "", rec.expectativa || ""]); });
+          }
         }
         const pf = perfis[uid] || {};
         CLI.push([nomeU(uid), pf.empresa || "", c.tipo === "previo" ? "Orçamento prévio" : "Levantamento", c.nome || "", c.municipio || "", c.uf || "", c.contato || "", c.telefone || "", pastos.length, +ha.toFixed(2), (c.proposta && c.proposta.safra) || "", tot ? +tot.toFixed(2) : "", ha && tot ? +(tot / ha).toFixed(2) : "", c.obs || ""]);

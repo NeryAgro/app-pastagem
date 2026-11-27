@@ -144,12 +144,7 @@ function go(view){
   if(S.dirty && !view.force){ S.pending=view; render(); return; }
   S.pending=null; S.dirty=false; S.armed=null; S.importing=null; S.picker=false;
   if(view.name==="cliente"){ const c=view.id?cliente(view.id):null; S.draft=c?clone(c):{tipo:"",nome:"",municipio:"",uf:"",contato:"",telefone:"",tecnico:"",obs:""}; if(c&&!c.tipo) S.draft.tipo="completo"; S.draft.rel=relDe(c); }
-  if(view.name==="previo"){ const c=cliente(view.id)||{}; const pv=c.previo||{}; const r=pv.rec||{};
-    const precos={}; Object.entries(pv.precos||{}).forEach(([k,v])=>precos[k]=decStr(v));
-    S.draft={clienteId:view.id,safra:pv.safra||safraAtual(),data:pv.data||today(),modalidade:pv.modalidade||"",daninhas:(pv.daninhas||[]).map(w=>({nome:w.nome})),
-      rec:{itens:(r.itens||[]).map(i=>({produto:i.produto,produtoId:i.produtoId||"",unidade:i.unidade||"L",dose:decStr(i.dose)})),obs:r.obs||"",expectativa:r.expectativa||"",vazao:decStr(r.vazao),porBomba:!!r.porBomba,bombasHa:decStr(r.bombasHa)},
-      precos,perfis:(pv.perfis||[]).map(x=>({nome:x.nome||"",ha:decStr(x.ha),precoHa:decStr(x.precoHa)})),mostrarPrecos:!!pv.mostrarPrecos,validade:pv.validade||"15 dias",pagamento:pv.pagamento||"",obsTec:pv.obsTec||"",obsCom:pv.obsCom||""};
-    if(!S.draft.rec.itens.length) S.draft.rec.itens.push({produto:"",dose:"",unidade:S.draft.rec.porBomba?"mL":"L"}); S.dnCat=false; S.qd=""; }
+  if(view.name==="previo"){ draftPrevio(cliente(view.id)||{id:view.id}); }
   if(view.name==="pasto"){ const p=view.id?S.pastos.find(x=>x.id===view.id):null; S.draft=p?clone(p):{clienteId:view.clienteId,fazenda:view.fazenda||"",nome:"",areaHa:"",capim:"",condicao:"",modalidade:"",daninhas:[{nome:"",classe:"",estagio:"",infestacao:""}],riscoGC:"",riscoGCNota:"",rocada:"",rocadaNota:"",fotos:[],poligono:null,kml:"",obs:"",dataVisita:today()}; }
   if(view.name==="pasto"){ S.draft.daninhas=S.draft.daninhas||[]; S.draft.fotos=S.draft.fotos||[]; if(!S.draft.daninhas.length) S.draft.daninhas.push({nome:"",classe:"",estagio:"",infestacao:""}); if(typeof S.draft.areaHa==="number") S.draft.areaHa=String(S.draft.areaHa).replace(".",","); S.draft.areas=clone(areasDe(S.draft)); delete S.draft.poligono; delete S.draft.kml; if(MOD_ANTIGA[S.draft.modalidade]) S.draft.modalidade=MOD_ANTIGA[S.draft.modalidade]; }
   if(view.name==="pasto"){ const r=S.draft.rec||{}; S.draft.rec={itens:(r.itens||[]).map(i=>({produto:i.produto,produtoId:i.produtoId||"",unidade:i.unidade||"L",dose:decStr(i.dose)})),obs:r.obs||"",expectativa:r.expectativa||"",vazao:decStr(r.vazao),porBomba:!!r.porBomba,bombasHa:decStr(r.bombasHa)};
@@ -353,8 +348,8 @@ function vPasto(){
   ${isNew?"":`<div><button class="danger ${S.armed==="pasto"?"armed":""}" data-a="excluir-pasto">${S.armed==="pasto"?"Confirmar exclusão do pasto":"Excluir pasto"}</button></div>`}`;
 }
 
-function ajustarModo(){
-  const d=S.draft; d.rec=d.rec||{itens:[]}; const loc=ehLocal(d.modalidade);
+function ajustarModo(d=S.draft){
+  d.rec=d.rec||{itens:[]}; const loc=ehLocal(d.modalidade);
   if(loc&&!d.rec.porBomba){ d.rec.porBomba=true; d.rec.itens.forEach(i=>{ i.unidade=unidBomba(i.unidade); i.dose=""; }); }
   else if(!loc&&d.rec.porBomba){ d.rec.porBomba=false; d.rec.itens.forEach(i=>{ const pp=S.produtos.find(x=>x.nome===i.produto); i.unidade=pp?.unidade||"L"; i.dose=""; }); }
 }
@@ -522,47 +517,72 @@ async function salvarProposta(silent){
 }
 
 /* ---------- orçamento prévio (sem levantamento) ---------- */
-// Foto do catálogo para um nome de planta daninha (aceita "Nome | Outro nome").
+// O orçamento é feito por perfil de área ou pasto: cada perfil tem nome, tamanho, modalidade, plantas daninhas e recomendação.
+// Os preços dos produtos valem para todos os perfis. No final, o custo por ha de cada perfil.
 function fotoDn(nome){ const F=S.fotosDn||{}; if(!nome) return null; const k=window.chaveDaninha(nome); if(F[k]) return F[k];
   for(const parte of String(nome).split("|")){ const kp=window.chaveDaninha(parte); if(F[kp]) return F[kp]; }
   const alvo=DANINHAS.find(x=>x.split("|").some(p=>window.chaveDaninha(p)===k)); return alvo?F[window.chaveDaninha(alvo)]||null:null; }
-const prevRec = c => c?.previo?.rec||{itens:[]};
-const prevPrecos = c => c?.previo?.precos||{};
 const temRecPrevio = rec => (rec?.itens||[]).some(i=>i.produto&&dec(i.dose));
+const custoHaPrevio = (rec,pr) => semEstimativa(rec)||!temPreco(pr)||!temRecPrevio(rec) ? null : recCusto(rec,pr);
+// Perfis salvos (aceita o formato antigo, com uma recomendação só).
+function perfisSalvos(pv){
+  pv=pv||{};
+  if(Array.isArray(pv.perfis)&&pv.perfis.some(x=>x&&x.rec)) return pv.perfis;
+  if(pv.rec||(pv.daninhas||[]).length) { const p0=(pv.perfis||[])[0]||{}; return [{nome:p0.nome||"Área 1",ha:p0.ha,modalidade:pv.modalidade||"",daninhas:pv.daninhas||[],rec:pv.rec||{itens:[]}}]; }
+  return [];
+}
+function resumoPrevio(pv){ const pr=pv?.precos||{}; const linhas=perfisSalvos(pv).map(p=>({nome:p.nome||"",ha:dec(p.ha)||0,custo:custoHaPrevio(p.rec,pr),rec:p.rec||{}}));
+  const ok=linhas.filter(l=>l.custo!=null&&l.ha); const ha=linhas.reduce((s,l)=>s+l.ha,0);
+  const medio=ok.length?ok.reduce((s,l)=>s+l.ha*l.custo,0)/ok.reduce((s,l)=>s+l.ha,0):(linhas.length===1?linhas[0].custo:null);
+  return {linhas,ha,medio}; }
 function previoItem(c){
-  const pv=c.previo||{}, rec=prevRec(c), pr=prevPrecos(c), dn=(pv.daninhas||[]).map(w=>w.nome).filter(Boolean);
-  const custo=temRecPrevio(rec)&&temPreco(pr);
+  const pv=c.previo||{}, rs=resumoPrevio(pv); const nomes=rs.linhas.map(l=>l.nome).filter(Boolean);
   return `<button class="card item" data-a="abrir-cliente" data-id="${c.id}">
     <span class="t">${esc(c.nome||"Sem nome")}</span>
-    <span class="n">${custo?esc(custoHaTxt(rec,pr))+(semEstimativa(rec)?"":"<small>/ha</small>"):"—"}</span>
-    <span class="s">${esc([c.municipio,c.uf].filter(Boolean).join(" / ")||"Município não informado")}${pv.modalidade?" · "+esc(pv.modalidade):""}${dn.length?" · "+esc(dn.map(n=>n.split(" | ")[0]).join(", ")):""}</span>
-    <span class="chips"><span class="chip prev">Orçamento prévio</span>${temRecPrevio(rec)?"":`<span class="chip warn">Sem produtos</span>`}${pv.data?`<span class="chip">${fmtDate(pv.data)}</span>`:""}</span>
+    <span class="n">${rs.medio!=null?brl(rs.medio)+"<small>/ha</small>":"—"}</span>
+    <span class="s">${esc([c.municipio,c.uf].filter(Boolean).join(" / ")||"Município não informado")} · ${rs.linhas.length} perfi${rs.linhas.length===1?"l":"s"}${rs.ha?` · ${fmtHa(rs.ha)} ha`:""}${nomes.length?" · "+esc(nomes.join(", ")):""}</span>
+    <span class="chips"><span class="chip prev">Orçamento prévio</span>${rs.linhas.some(l=>temRecPrevio(l.rec))?"":`<span class="chip warn">Sem produtos</span>`}${pv.data?`<span class="chip">${fmtDate(pv.data)}</span>`:""}</span>
   </button>`;
 }
 function previoCta(id){
-  const c=cliente(id)||{}, rec=prevRec(c), pr=prevPrecos(c), n=(c.previo?.daninhas||[]).length;
-  return `<section class="card prop-cta"><div class="money"><div><b>${n}</b><span>planta${n===1?"":"s"} daninha${n===1?"":"s"}</span></div><div><b>${temRecPrevio(rec)&&temPreco(pr)?custoHaTxt(rec,pr)+(semEstimativa(rec)?"":"/ha"):"Sem preços"}</b><span>custo</span></div></div><button class="primary" data-a="abrir-previo" data-id="${id}">${c.previo?"Abrir orçamento prévio":"Montar orçamento prévio"}</button></section>`;
+  const c=cliente(id)||{}, rs=resumoPrevio(c.previo);
+  return `<section class="card prop-cta"><div class="money"><div><b>${rs.linhas.length}</b><span>perfi${rs.linhas.length===1?"l":"s"} de área</span></div><div><b>${fmtHa(rs.ha)}</b><span>hectares</span></div><div><b>${rs.medio!=null?brl(rs.medio)+"/ha":"Sem preços"}</b><span>custo${rs.linhas.length>1?" médio":""}</span></div></div><button class="primary" data-a="abrir-previo" data-id="${id}">${c.previo?"Abrir orçamento prévio":"Montar orçamento prévio"}</button></section>`;
 }
+const novoPerfil = () => ({nome:"",ha:"",modalidade:"",daninhas:[],rec:{itens:[{produto:"",dose:"",unidade:"L"}],obs:"",expectativa:"",vazao:"",porBomba:false,bombasHa:""}});
+function ativarPerfil(i){ const d=S.draft; if(!d.perfis.length) d.perfis.push(novoPerfil()); S.pi=Math.max(0,Math.min(i,d.perfis.length-1)); const p=d.perfis[S.pi];
+  d.rec=p.rec; d.daninhas=p.daninhas; d.modalidade=p.modalidade; S.dnCat=false; S.qd=""; }
+function draftPrevio(c){ const pv=c.previo||{};
+  const precos={}; Object.entries(pv.precos||{}).forEach(([k,v])=>precos[k]=decStr(v));
+  const perfis=perfisSalvos(pv).map(p=>{ const r=p.rec||{}; return {nome:p.nome||"",ha:decStr(p.ha),modalidade:p.modalidade||"",daninhas:(p.daninhas||[]).map(w=>({nome:w.nome})),
+    rec:{itens:(r.itens||[]).map(i=>({produto:i.produto,produtoId:i.produtoId||"",unidade:i.unidade||"L",dose:decStr(i.dose)})),obs:r.obs||"",expectativa:r.expectativa||"",vazao:decStr(r.vazao),porBomba:!!r.porBomba,bombasHa:decStr(r.bombasHa)}}; });
+  perfis.forEach(p=>{ if(!p.rec.itens.length) p.rec.itens.push({produto:"",dose:"",unidade:p.rec.porBomba?"mL":"L"}); });
+  S.draft={clienteId:c.id,safra:pv.safra||safraAtual(),data:pv.data||today(),perfis,precos,mostrarPrecos:!!pv.mostrarPrecos,validade:pv.validade||"15 dias",pagamento:pv.pagamento||"",obsTec:pv.obsTec||"",obsCom:pv.obsCom||""};
+  ativarPerfil(0); }
 function previoTotHtml(){
-  const d=S.draft, pr=d.precos;
-  if(!temPreco(pr)) return `<div><span>Informe os preços abaixo para calcular o custo por hectare.</span></div>`;
+  const d=S.draft, pr=d.precos, p=d.perfis[S.pi];
+  if(!temPreco(pr)) return `<div><span>Informe os preços dos produtos (mais abaixo) para calcular o custo por hectare.</span></div>`;
   if(d.rec.porBomba){ const cb=custoBomba(d.rec,pr), nb=dec(d.rec.bombasHa);
     return `<div><b>${brl(cb)}</b><span>custo por bomba de ${BOMBA} L</span></div>`+(nb?`<div><b>${brl(cb*nb)}</b><span>custo por hectare (${fmtDose(nb)} bombas/ha)</span></div>`:`<div><span>Informe as bombas por hectare para calcular o custo por hectare.</span></div>`); }
-  return `<div><b>${brl(recCusto(d.rec,pr))}</b><span>custo por hectare</span></div>`;
+  return `<div><b>${brl(recCusto(d.rec,pr))}</b><span>custo por hectare${p?.nome?" · "+esc(p.nome):""}</span></div>`;
 }
-function prodsPrevio(){ const m={}; (S.draft.rec.itens||[]).filter(i=>i.produto).forEach(i=>{ m[i.produto]=uCompra(i.unidade||"L"); }); return Object.entries(m).map(([produto,unidade])=>({produto,unidade})); }
+function prodsPrevio(){ const m={}; S.draft.perfis.forEach(p=>(p.rec.itens||[]).filter(i=>i.produto).forEach(i=>{ m[i.produto]=uCompra(i.unidade||"L"); })); return Object.entries(m).map(([produto,unidade])=>({produto,unidade})); }
+function resumoHtml(){ const d=S.draft, pr=d.precos; const ls=d.perfis.map(p=>({nome:p.nome,ha:dec(p.ha)||0,custo:custoHaPrevio(p.rec,pr),rec:p.rec}));
+  const ok=ls.filter(l=>l.custo!=null&&l.ha), tha=ls.reduce((s,l)=>s+l.ha,0), med=ok.length?ok.reduce((s,l)=>s+l.ha*l.custo,0)/ok.reduce((s,l)=>s+l.ha,0):null;
+  const cx=l=>l.custo!=null?brl(l.custo)+"/ha":semEstimativa(l.rec)&&temPreco(pr)?brl(custoBomba(l.rec,pr))+"/bomba":"—";
+  return `<div class="rs"><div class="rs-h"><span>Perfil de área / pasto</span><span>Tamanho</span><span>Custo por ha</span></div>
+    ${ls.map((l,i)=>`<div class="rs-l"><span>${esc(l.nome||`Perfil ${i+1}`)}</span><span class="mono">${l.ha?fmtHa(l.ha)+" ha":"—"}</span><span class="mono">${cx(l)}</span></div>`).join("")}
+    ${ls.length>1?`<div class="rs-l rs-t"><span>Total</span><span class="mono">${fmtHa(tha)} ha</span><span class="mono">${med!=null?brl(med)+"/ha":"—"}${med!=null?"<small>média</small>":""}</span></div>`:""}</div>`; }
 function updPrevio(){ const d=S.draft, pr=d.precos;
   d.rec.itens.forEach((r,i)=>{ const el=document.getElementById(`r-${i}-c`); if(el) el.textContent=temPreco(pr)?brl(custoItem(r,pr))+(d.rec.porBomba?"/bomba":"/ha"):""; });
   const t=document.getElementById("rec-tot"); if(t) t.innerHTML=previoTotHtml();
-  const base=custoHaPrevio(d.rec,pr); (d.perfis||[]).forEach((x,i)=>{ const el=document.getElementById(`pf-${i}-p`); if(el) el.placeholder=base!=null?fmtN(base):"0,00"; }); }
+  const r=document.getElementById("pv-resumo"); if(r) r.innerHTML=resumoHtml(); }
 function addDaninhaDigitada(){ const el=document.getElementById("dn-novo"); const v=(el?.value||"").trim(); if(!v) return;
   const canon=DANINHAS.find(x=>window.chaveDaninha(x)===window.chaveDaninha(v)||x.split("|").some(p=>window.chaveDaninha(p)===window.chaveDaninha(v)))||v;
   if(!S.draft.daninhas.some(w=>w.nome===canon)) S.draft.daninhas.push({nome:canon}); S.dirty=true; render(); const n=document.getElementById("dn-novo"); if(n){ n.value=""; n.focus(); } }
 function vPrevio(){
-  const c=cliente(S.view.id)||{}, d=S.draft, pr=d.precos;
+  const c=cliente(S.view.id)||{}, d=S.draft, pr=d.precos, p=d.perfis[S.pi], i0=S.pi;
   const sel=new Set(d.daninhas.map(w=>w.nome)); const nFotos=Object.keys(S.fotosDn||{}).length;
-  const q=window.chaveDaninha(S.qd||"");
-  const cat=DANINHAS.filter(n=>!q||window.chaveDaninha(n).includes(q));
+  const q=window.chaveDaninha(S.qd||""); const cat=DANINHAS.filter(n=>!q||window.chaveDaninha(n).includes(q));
   const prods=prodsPrevio();
   return `
   <div><button class="crumb" data-a="voltar-cliente-previo">← ${esc(c.nome||"Cliente")}</button></div>
@@ -571,22 +591,29 @@ function vPrevio(){
     <div class="grid">
       <label class="f">Safra<input id="pv-safra" data-pp="safra" value="${esc(d.safra)}"></label>
       <label class="f">Data<input id="pv-data" type="date" data-pp="data" value="${esc(d.data)}"></label>
-      <label class="f full">Modalidade de aplicação<select id="pv-mod" data-f="modalidade">${opts(MODALIDADES,d.modalidade)}</select></label>
     </div>
   </section>
 
-  <section class="card section">
-    <div class="row spread"><h2>Plantas daninhas</h2><span class="note">${d.daninhas.length} escolhida${d.daninhas.length===1?"":"s"}</span></div>
+  <div class="row spread"><h2>Perfis de área ou pastos</h2><button data-a="add-perfil">+ Novo perfil</button></div>
+  ${d.perfis.length>1?`<div class="perfis-tabs" role="tablist">${d.perfis.map((x,i)=>{ const cu=custoHaPrevio(x.rec,pr); return `<button type="button" role="tab" data-a="ir-perfil" data-i="${i}" aria-pressed="${i===i0}"><b>${esc(x.nome||`Perfil ${i+1}`)}</b><span>${dec(x.ha)?fmtHa(dec(x.ha))+" ha":"— ha"}${cu!=null?" · "+brl(cu)+"/ha":""}</span></button>`; }).join("")}</div>`:""}
+
+  <section class="card section perfil-ed">
+    <div class="row spread"><h2>Informação do pasto${d.perfis.length>1?` <span class="note">(${i0+1} de ${d.perfis.length})</span>`:""}</h2>${d.perfis.length>1?`<button class="danger ${S.armed==="perfil"?"armed":""}" data-a="rm-perfil">${S.armed==="perfil"?"Confirmar exclusão":"Excluir perfil"}</button>`:""}</div>
+    <div class="grid">
+      <label class="f full">Perfil de área ou pasto<input id="pf-n" data-perfil="${i0}" data-k="nome" value="${esc(p.nome)}" placeholder="Ex.: Pasto 12, ou Baixada com infestação alta"></label>
+      <label class="f">Tamanho (ha)<input id="pf-h" class="mono" data-perfil="${i0}" data-k="ha" inputmode="decimal" value="${esc(p.ha)}" placeholder="0,00"></label>
+      <label class="f">Modalidade de aplicação<select id="pf-mod" data-perfil="${i0}" data-k="modalidade">${opts(MODALIDADES,p.modalidade)}</select></label>
+    </div>
+
+    <div class="row spread"><h3>Plantas daninhas</h3><span class="note">${d.daninhas.length} escolhida${d.daninhas.length===1?"":"s"}</span></div>
     ${d.daninhas.length?`<div class="dn-sel">${d.daninhas.map((w,i)=>{ const f=fotoDn(w.nome); return `<div class="dn-card">${f?`<img src="${esc(f.thumb)}" alt="${esc(w.nome)}">`:`<div class="dn-sem">Sem foto</div>`}<div class="dn-t"><b>${esc(w.nome.split(" | ")[0])}</b>${f?.cientifico?`<i>${esc(f.cientifico)}</i>`:""}</div><button class="ghost x" data-a="dn-rm" data-i="${i}" aria-label="Remover ${esc(w.nome)}">✕</button></div>`; }).join("")}</div>`:`<p class="note">Escolha no catálogo ou digite o nome. Planta fora do catálogo entra sem foto.</p>`}
     <div class="row dn-add"><input id="dn-novo" list="dl-daninhas" placeholder="Digite o nome da planta" aria-label="Nome da planta daninha"><button data-a="dn-add">Adicionar</button></div>
     <div><button data-a="dn-catalogo">${S.dnCat?"Fechar catálogo":"Escolher no catálogo com fotos"}</button>${nFotos?"":`<span class="note"> As fotos do catálogo ainda não foram carregadas neste aparelho.</span>`}</div>
     ${S.dnCat?`<div class="inline"><input type="search" id="qd" placeholder="Buscar planta" value="${esc(S.qd)}" aria-label="Buscar planta no catálogo">
       <div class="dn-grid">${cat.map(n=>{ const f=fotoDn(n); return `<button type="button" class="dn-op" data-a="dn-toggle" data-v="${esc(n)}" aria-pressed="${sel.has(n)}">${f?`<img src="${esc(f.thumb)}" alt="" loading="lazy">`:`<span class="dn-sem">Sem foto</span>`}<span>${esc(n.split(" | ")[0])}</span></button>`; }).join("")||`<p class="note">Nenhuma planta com esse nome.</p>`}</div></div>`:""}
-  </section>
 
-  <section class="card section" id="sec-rec">
-    <h2>Produtos e doses</h2>
-    ${d.rec.itens.map((r,i)=>{const ps=prodsUso().map(p=>p.nome); const lista=r.produto&&!ps.includes(r.produto)?[r.produto,...ps]:ps; return `<div class="rec">
+    <h3 id="sec-rec">Produtos e doses</h3>
+    ${d.rec.itens.map((r,i)=>{const ps=prodsUso().map(x=>x.nome); const lista=r.produto&&!ps.includes(r.produto)?[r.produto,...ps]:ps; return `<div class="rec">
       <label class="f sp">Produto<select id="r-${i}-p" data-r="${i}" data-k="produto">${opts(lista,r.produto,"Selecione o produto")}</select></label>
       <label class="f">Dose (${esc(r.unidade||"L")}/${d.rec.porBomba?"bomba "+BOMBA+" L":"ha"})<input id="r-${i}-d" class="mono" data-r="${i}" data-k="dose" inputmode="decimal" value="${esc(r.dose)}" placeholder="0,00"></label>
       <div class="cost" id="r-${i}-c">${temPreco(pr)?brl(custoItem(r,pr))+(d.rec.porBomba?"/bomba":"/ha"):""}</div>
@@ -594,21 +621,24 @@ function vPrevio(){
     </div>`}).join("")}
     <div class="row"><button data-a="add-rec">+ Adicionar produto</button></div>
     ${d.rec.porBomba?`<p class="note">Aplicação localizada: doses por bomba de ${BOMBA} litros.</p><label class="f">Bombas de ${BOMBA} L por hectare (estimativa, opcional)<input id="p-bombas" class="mono" data-bombas="1" inputmode="decimal" value="${esc(d.rec.bombasHa??"")}" placeholder="Ex.: 8"></label>`:""}
-    ${/drone/i.test(d.modalidade||"")?`<label class="f">Vazão do drone (L/ha)<input id="p-vazao" class="mono" data-vazao="1" inputmode="decimal" value="${esc(d.rec.vazao)}" placeholder="Ex.: 10"></label>`:""}
+    ${/drone/i.test(p.modalidade||"")?`<label class="f">Vazão do drone (L/ha)<input id="p-vazao" class="mono" data-vazao="1" inputmode="decimal" value="${esc(d.rec.vazao)}" placeholder="Ex.: 10"></label>`:""}
     <label class="f">Expectativa de controle<input id="p-expect" data-expect="1" value="${esc(d.rec.expectativa)}" placeholder="Ex.: 95%"></label>
     <label class="f">Observação técnica<textarea id="p-recobs" data-recobs="1" placeholder="Ex.: confirmar doses depois da visita de campo">${esc(d.rec.obs)}</textarea></label>
+    <div class="money" id="rec-tot">${previoTotHtml()}</div>
   </section>
 
   <section class="card section">
-    <div class="row spread"><h2>Preços</h2><span class="note">Usados só para calcular o custo por hectare</span></div>
+    <div class="row spread"><h2>Preços</h2><span class="note">Valem para todos os perfis</span></div>
     ${prods.length?`<div class="plist">${prods.map((i,k)=>`<div class="prow"><div class="pn"><b>${esc(i.produto)}</b></div>
-      <label class="pz"><span>R$</span><input id="pz-${k}" class="mono" data-preco="${esc(i.produto)}" inputmode="decimal" value="${esc(pr[i.produto]??"")}" placeholder="0,00" aria-label="Preço de ${esc(i.produto)} por ${esc(i.unidade)}"><span>/${esc(i.unidade)}</span></label><span></span></div>`).join("")}</div>`:`<p class="note">Escolha os produtos acima para informar os preços.</p>`}
-    <div class="money" id="rec-tot">${previoTotHtml()}</div>
+      <label class="pz"><span>R$</span><input id="pz-${k}" class="mono" data-preco="${esc(i.produto)}" inputmode="decimal" value="${esc(pr[i.produto]??"")}" placeholder="0,00" aria-label="Preço de ${esc(i.produto)} por ${esc(i.unidade)}"><span>/${esc(i.unidade)}</span></label><span></span></div>`).join("")}</div>`:`<p class="note">Escolha os produtos para informar os preços.</p>`}
     <label class="check"><input type="checkbox" id="pv-mostrar" ${d.mostrarPrecos?"checked":""}> Mostrar o preço por litro/kg no final do orçamento</label>
     <p class="note">Desmarcado, o PDF mostra só o custo por hectare.</p>
   </section>
 
-  <section class="card section" id="sec-perfis">${perfisHtml()}</section>
+  <section class="card section">
+    <h2>Custo por hectare de cada área</h2>
+    <div id="pv-resumo">${resumoHtml()}</div>
+  </section>
 
   <section class="card section">
     <div class="grid">
@@ -620,23 +650,11 @@ function vPrevio(){
   </section>
   ${relDe(c).responsavel?"":`<p class="note">Dica: preencha o responsável técnico em “Dados que aparecem no relatório”, no cadastro do cliente, para ele sair na assinatura do PDF.</p>`}`;
 }
-// Perfis de área: nome, tamanho e preço por ha (em branco = custo por ha calculado da recomendação).
-const custoHaPrevio = (rec,pr) => semEstimativa(rec)||!temPreco(pr) ? null : recCusto(rec,pr);
-function perfisHtml(){ const d=S.draft, base=custoHaPrevio(d.rec,d.precos), ps=d.perfis||[];
-  const tot=ps.reduce((s,x)=>s+(dec(x.ha)||0),0);
-  return `<div class="row spread"><h2>Perfis de área</h2><span class="note">Aparece em Condições, no PDF</span></div>
-    ${ps.map((x,i)=>`<div class="perfil">
-      <label class="f sp">Perfil de área ou pasto<input id="pf-${i}-n" data-perfil="${i}" data-k="nome" value="${esc(x.nome)}" placeholder="Ex.: Baixada, infestação alta"></label>
-      <label class="f">Tamanho (ha)<input id="pf-${i}-h" class="mono" data-perfil="${i}" data-k="ha" inputmode="decimal" value="${esc(x.ha)}" placeholder="0,00"></label>
-      <label class="f">Preço por ha (R$)<input id="pf-${i}-p" class="mono" data-perfil="${i}" data-k="precoHa" inputmode="decimal" value="${esc(x.precoHa)}" placeholder="${base!=null?esc(fmtN(base)):"0,00"}"></label>
-      <button class="ghost x" data-a="rm-perfil" data-i="${i}" aria-label="Remover perfil">✕</button></div>`).join("")}
-    <div class="row"><button data-a="add-perfil">+ Adicionar perfil de área</button>${ps.length?`<span class="note">Total: <b class="mono" id="pf-tot">${fmtHa(tot)} ha</b></span>`:""}</div>
-    <p class="note">Deixe o preço por ha em branco para usar o custo da recomendação${base!=null?` (${brl(base)}/ha)`:""}. Preencha para um perfil com preço diferente.</p>`; }
 function previoDados(){ const d=S.draft;
-  return {safra:d.safra||"",data:d.data||"",modalidade:d.modalidade||"",daninhas:d.daninhas.filter(w=>w.nome).map(w=>({nome:w.nome})),
-    rec:{itens:d.rec.itens.filter(i=>i.produto).map(i=>({produto:i.produto,produtoId:i.produtoId||"",unidade:i.unidade||"L",dose:dec(i.dose)})),obs:d.rec.obs||"",expectativa:d.rec.expectativa||"",vazao:dec(d.rec.vazao),porBomba:!!d.rec.porBomba,bombasHa:dec(d.rec.bombasHa)},
+  return {safra:d.safra||"",data:d.data||"",
+    perfis:d.perfis.map((p,i)=>({nome:(p.nome||"").trim()||`Perfil ${i+1}`,ha:dec(p.ha),modalidade:p.modalidade||"",daninhas:p.daninhas.filter(w=>w.nome).map(w=>({nome:w.nome})),
+      rec:{itens:p.rec.itens.filter(x=>x.produto).map(x=>({produto:x.produto,produtoId:x.produtoId||"",unidade:x.unidade||"L",dose:dec(x.dose)})),obs:p.rec.obs||"",expectativa:p.rec.expectativa||"",vazao:dec(p.rec.vazao),porBomba:!!p.rec.porBomba,bombasHa:dec(p.rec.bombasHa)}})),
     precos:Object.fromEntries(Object.entries(d.precos||{}).map(([k,v])=>[k,dec(v)]).filter(([k,v])=>v!=null)),
-    perfis:(d.perfis||[]).filter(x=>(x.nome||"").trim()||dec(x.ha)).map(x=>({nome:(x.nome||"").trim(),ha:dec(x.ha),precoHa:dec(x.precoHa)})),
     mostrarPrecos:!!d.mostrarPrecos,validade:d.validade||"",pagamento:d.pagamento||"",obsTec:d.obsTec||"",obsCom:d.obsCom||"",atualizadoEm:new Date().toISOString()}; }
 async function salvarPrevio(silent){
   try{ await db.collection("clientes").doc(S.view.id).update({previo:previoDados()}); S.dirty=false; if(!silent) toast("Orçamento salvo"); bar(); return true; }
@@ -646,9 +664,10 @@ async function gerarPdfPrevio(){
   if(!window.jspdf?.jsPDF){ toast("O gerador de PDF não carregou. Recarregue a página e tente de novo."); return; }
   const c=cliente(S.view.id)||{}, cfg=relDe(c);
   if(S.dirty) await salvarPrevio(true);
-  const pv=previoDados(), rec=pv.rec, pr=pv.precos;
-  const itens=rec.itens.filter(i=>i.produto&&dec(i.dose));
-  if(!itens.length){ toast("Escolha pelo menos um produto com dose."); return; }
+  const pv=previoDados(), pr=pv.precos;
+  const perfis=pv.perfis.filter(p=>temRecPrevio(p.rec));
+  if(!perfis.length){ toast("Escolha pelo menos um produto com dose."); return; }
+  const rs=resumoPrevio({...pv,perfis});
   S.gerando="Preparando fotos…"; bar();
   try{
     const {jsPDF}=window.jspdf; const doc=new jsPDF({unit:"mm",format:"a4"});
@@ -664,17 +683,20 @@ async function gerarPdfPrevio(){
     const novaPagina=()=>{ doc.addPage(); header(); y=28; };
     const precisa=h=>{ if(y+h>280) novaPagina(); };
     const h1=t=>{ precisa(16); doc.setFont("helvetica","bold"); doc.setFontSize(14); doc.setTextColor(...BLUE); doc.text(t,M,y+6); y+=11; };
+    const h2=t=>{ precisa(12); doc.setFont("helvetica","bold"); doc.setFontSize(10.5); doc.setTextColor(...INK); doc.text(t,M,y+4); y+=7; };
     const para=(t,size=9.5,color=INK,style="normal")=>{ if(!t) return; doc.setFont("helvetica",style); doc.setFontSize(size); doc.setTextColor(...color);
       doc.splitTextToSize(String(t),CW).forEach(l=>{ precisa(5); doc.text(l,M,y+4); y+=size*0.42+0.6; }); y+=1.5; };
     const tabela=opts=>{ doc.autoTable({startY:y,margin:{left:M,right:M,top:28,bottom:18},theme:"grid",
         styles:{font:"helvetica",fontSize:9,cellPadding:2,textColor:INK,lineColor:LINE,lineWidth:.2,overflow:"linebreak"},
         headStyles:{fillColor:BLUE,textColor:255,fontStyle:"bold"},footStyles:{fillColor:[234,238,232],textColor:INK,fontStyle:"bold"},
         alternateRowStyles:{fillColor:[247,249,246]},didDrawPage:()=>{ if(doc.internal.getCurrentPageInfo().pageNumber>1) header(); },...opts}); y=doc.lastAutoTable.finalY+6; };
+    const R=t=>({content:t,styles:{halign:"right"}});
     const caixas=boxes=>{ const n=boxes.length, bw=(CW-3*(n-1))/n; precisa(24);
       boxes.forEach(([k,v,dest],i)=>{ const x=M+i*(bw+3); if(dest) doc.setFillColor(...BLUE); else doc.setFillColor(234,238,232); doc.roundedRect(x,y,bw,20,2,2,"F");
         doc.setFont("helvetica","normal"); doc.setFontSize(8); doc.setTextColor(...(dest?[255,255,255]:MUT)); doc.text(k,x+3,y+6);
         doc.setFont("helvetica","bold"); doc.setFontSize(13); doc.setTextColor(...(dest?[255,255,255]:INK)); doc.text(doc.splitTextToSize(v,bw-6)[0],x+3,y+14.5); });
       y+=27; };
+    const custoTxt=rec=>{ const cu=custoHaPrevio(rec,pr); return cu!=null?brl(cu)+"/ha":semEstimativa(rec)&&temPreco(pr)?brl(custoBomba(rec,pr))+"/bomba":"—"; };
 
     // capa
     header(); y=30;
@@ -683,17 +705,22 @@ async function gerarPdfPrevio(){
     const info=[["Cliente",c.nome||""],["Município",[c.municipio,c.uf].filter(Boolean).join(" / ")||"-"],["Safra",pv.safra||"-"],["Data",fmtDate(pv.data)||"-"],["Distribuidor",cfg.empresa||"-"],["Responsável técnico",cfg.responsavel||"-"]];
     doc.setFontSize(10); info.forEach(([k,v])=>{ doc.setFont("helvetica","normal"); doc.setTextColor(...MUT); doc.text(k,M,y+4); doc.setFont("helvetica","bold"); doc.setTextColor(...INK); doc.text(String(v),M+42,y+4); y+=6.5; });
     y+=4;
-    const nb=dec(rec.bombasHa);
-    if(rec.porBomba) caixas([["Custo por bomba de "+BOMBA+" L",brl(custoBomba(rec,pr)),!nb]].concat(nb?[["Custo por hectare",brl(recCusto(rec,pr))+"/ha",true]]:[]).concat([["Modalidade",pv.modalidade||"-"]]));
-    else caixas([["Custo por hectare",brl(recCusto(rec,pr))+"/ha",true],["Modalidade",[pv.modalidade||"-",rec.vazao?fmtDose(rec.vazao)+" L/ha":""].filter(Boolean).join(" · ")]]);
+    if(perfis.length===1) caixas([["Área",rs.ha?fmtHa(rs.ha)+" ha":"-"],["Custo por hectare",custoTxt(perfis[0].rec),true]]);
+    else caixas([["Perfis de área",String(perfis.length)],["Área total",fmtHa(rs.ha)+" ha"],["Custo médio por hectare",rs.medio!=null?brl(rs.medio)+"/ha":"—",true]]);
     if(pv.obsTec){ h1("Considerações técnicas"); para(pv.obsTec); }
 
-    // 1. plantas daninhas
-    const dns=pv.daninhas; let sec=0;
-    if(dns.length){
-      h1(`${++sec}. Plantas daninhas citadas`);
+    // um bloco por perfil
+    let n=0;
+    for(const p of perfis){
+      n++; S.gerando=`Montando perfil ${n} de ${perfis.length}…`; bar();
+      if(n>1){ y+=4; precisa(110); } else precisa(60);
+      h1(`${n}. ${p.nome}${p.ha?` · ${fmtHa(p.ha)} ha`:""}`);
+      const rec=p.rec, pb=rec.porBomba, nb=dec(rec.bombasHa);
+      const kv=[["Modalidade",p.modalidade],["Vazão (drone)",rec.vazao?fmtDose(rec.vazao)+" L/ha":""],["Bombas/ha",pb?(nb?fmtDose(nb)+` bombas de ${BOMBA} L/ha`:"não estimado"):""],["Expectativa de controle",rec.expectativa]].filter(r=>r[1]);
+      kv.forEach(([k,v])=>para(`${k}: ${v}`,9.5));
       const com=[], sem=[];
-      for(const w of dns){ const f=fotoDn(w.nome); if(f){ S.gerando=`Foto ${com.length+1}…`; bar(); const im=await fotoJpeg(f.foto); if(im){ com.push({nome:w.nome.split(" | ")[0],cientifico:f.cientifico,...im}); continue; } } sem.push(w.nome.split(" | ")[0]); }
+      for(const w of p.daninhas){ const f=fotoDn(w.nome); if(f){ const im=await fotoJpeg(f.foto); if(im){ com.push({nome:w.nome.split(" | ")[0],cientifico:f.cientifico,...im}); continue; } } sem.push(w.nome.split(" | ")[0]); }
+      if(com.length||sem.length) h2("Plantas daninhas");
       if(com.length){ const cols=3, gap=4, fw=(CW-gap*(cols-1))/cols, fh=fw*0.78, ch=fh+12;
         com.forEach((im,i)=>{ const col=i%cols; if(col===0){ if(i) y+=ch+3; precisa(ch); }
           const x=M+col*(fw+gap); const r=Math.min(fw/im.w,fh/im.h), iw=im.w*r, ih=im.h*r;
@@ -701,34 +728,29 @@ async function gerarPdfPrevio(){
           doc.setFont("helvetica","bold"); doc.setFontSize(9); doc.setTextColor(...INK); doc.text(doc.splitTextToSize(im.nome,fw)[0],x,y+fh+4.5);
           if(im.cientifico){ doc.setFont("helvetica","italic"); doc.setFontSize(8); doc.setTextColor(...MUT); doc.text(doc.splitTextToSize(im.cientifico,fw)[0],x,y+fh+8.5); } });
         y+=ch+5; }
-      if(sem.length) para((com.length?"Outras plantas daninhas citadas: ":"Plantas daninhas citadas: ")+sem.join(", ")+".",9.5);
+      if(sem.length) para((com.length?"Outras plantas daninhas citadas: ":"")+sem.join(", ")+".",9.5);
+      h2("Recomendação");
+      const itens=rec.itens.filter(i=>i.produto&&dec(i.dose));
+      tabela({head:[["Produto",R(pb?`Dose por bomba de ${BOMBA} L`:"Dose por hectare")]],
+        body:itens.map(i=>[i.produto,`${fmtDose(i.dose)} ${i.unidade||"L"}${pb?"":"/ha"}`]),
+        foot:pb?[["Custo por bomba",R(brl(custoBomba(rec,pr)))]].concat(nb?[[`Custo por hectare (${fmtDose(nb)} bombas/ha)`,R(brl(recCusto(rec,pr))+"/ha")]]:[]):[["Custo por hectare",R(brl(recCusto(rec,pr))+"/ha")]],
+        rowPageBreak:"avoid",columnStyles:{1:{halign:"right",cellWidth:62}}});
+      if(rec.obs) para("Observação técnica: "+rec.obs,9.5);
     }
 
-    // 2. recomendação
-    h1(`${++sec}. Recomendação`);
-    const pb=rec.porBomba;
-    tabela({head:[["Produto",pb?`Dose por bomba de ${BOMBA} L`:"Dose por hectare"]],
-      body:itens.map(i=>[i.produto,`${fmtDose(i.dose)} ${i.unidade||"L"}${pb?"":"/ha"}`]),
-      foot:pb?[["Custo por bomba",brl(custoBomba(rec,pr))]].concat(nb?[[`Custo por hectare (${fmtDose(nb)} bombas/ha)`,brl(recCusto(rec,pr))+"/ha"]]:[]):[["Custo por hectare",brl(recCusto(rec,pr))+"/ha"]],
-      columnStyles:{1:{halign:"right",cellWidth:62}}});
-    const kv=[["Modalidade",pv.modalidade],["Vazão (drone)",rec.vazao?fmtDose(rec.vazao)+" L/ha":""],["Bombas/ha",pb?(nb?fmtDose(nb)+` bombas de ${BOMBA} L/ha`:"não estimado"):""],["Expectativa de controle",rec.expectativa]].filter(r=>r[1]);
-    kv.forEach(([k,v])=>para(`${k}: ${v}`,9.5));
-    if(rec.obs) para("Observação técnica: "+rec.obs,9.5);
+    // condições: custo por ha de cada área
+    y+=4; precisa(70); h1(`${n+1}. Condições`);
+    h2("Custo por hectare de cada área");
+    tabela({head:[["Perfil de área / pasto",R("Tamanho (ha)"),R("Custo por ha")]],
+      body:perfis.map(p=>[p.nome,p.ha?fmtHa(p.ha):"—",custoTxt(p.rec)]),
+      foot:perfis.length>1?[["Total",R(fmtHa(rs.ha)),R(rs.medio!=null?brl(rs.medio)+"/ha (média)":"—")]]:undefined,
+      columnStyles:{1:{halign:"right",cellWidth:34},2:{halign:"right",cellWidth:50}}});
     para("Orçamento prévio, feito sem levantamento de campo. Doses e custos podem mudar depois da visita técnica.",8.5,MUT,"italic");
-
-    // 3. condições
-    const cond=[["Validade da proposta",pv.validade],["Condição de pagamento",pv.pagamento]].filter(r=>r[1]);
-    const perfis=pv.perfis||[], base=custoHaPrevio(rec,pr);
-    if(cond.length||pv.obsCom||perfis.length){ h1(`${++sec}. Condições`);
-      if(perfis.length){ const linhas=perfis.map(x=>{ const ph=x.precoHa!=null?x.precoHa:base; return [x.nome||"-",x.ha!=null?fmtHa(x.ha):"-",ph!=null?brl(ph)+"/ha":"—",x.ha||0,ph]; });
-        const tha=linhas.reduce((s,l)=>s+l[3],0), ok=linhas.filter(l=>l[4]!=null&&l[3]), med=ok.length?ok.reduce((s,l)=>s+l[3]*l[4],0)/ok.reduce((s,l)=>s+l[3],0):null;
-        tabela({head:[["Perfil de área","Tamanho (ha)","Preço por ha"]],body:linhas.map(l=>l.slice(0,3)),
-          foot:perfis.length>1?[["Total",{content:fmtHa(tha),styles:{halign:"right"}},{content:med!=null?brl(med)+"/ha (média)":"",styles:{halign:"right"}}]]:undefined,
-          columnStyles:{1:{halign:"right",cellWidth:34},2:{halign:"right",cellWidth:50}}}); }
-      cond.forEach(([k,v])=>para(`${k}: ${v}`,9.5)); if(pv.obsCom) para(pv.obsCom,9.5); }
-    if(pv.mostrarPrecos){ const ps=itens.reduce((m,i)=>{ const u=uCompra(i.unidade||"L"); if(!m.some(x=>x[0]===i.produto)) m.push([i.produto,u,dec(pr[i.produto])]); return m; },[]);
-      precisa(30); doc.setFont("helvetica","bold"); doc.setFontSize(10.5); doc.setTextColor(...INK); doc.text("Preço dos produtos",M,y+4); y+=7;
-      tabela({head:[["Produto","Preço"]],body:ps.map(([p,u,v])=>[p,v?`${brl(v)}/${u}`:"—"]),columnStyles:{1:{halign:"right",cellWidth:62}}}); }
+    [["Validade da proposta",pv.validade],["Condição de pagamento",pv.pagamento]].filter(r=>r[1]).forEach(([k,v])=>para(`${k}: ${v}`,9.5));
+    if(pv.obsCom) para(pv.obsCom,9.5);
+    if(pv.mostrarPrecos){ const ps=[]; perfis.forEach(p=>p.rec.itens.filter(i=>i.produto&&dec(i.dose)).forEach(i=>{ if(!ps.some(x=>x[0]===i.produto)) ps.push([i.produto,uCompra(i.unidade||"L"),dec(pr[i.produto])]); }));
+      h2("Preço dos produtos");
+      tabela({head:[["Produto",R("Preço")]],body:ps.map(([p,u,v])=>[p,v?`${brl(v)}/${u}`:"—"]),columnStyles:{1:{halign:"right",cellWidth:62}}}); }
     precisa(34); y+=14; doc.setDrawColor(...INK); doc.setLineWidth(.3); doc.line(M,y,M+75,y);
     doc.setFont("helvetica","bold"); doc.setFontSize(9.5); doc.setTextColor(...INK); doc.text(cfg.responsavel||"Responsável técnico",M,y+5);
     doc.setFont("helvetica","normal"); doc.setFontSize(8.5); doc.setTextColor(...MUT); doc.text([cfg.empresa||"",[cfg.telefone,cfg.email].filter(Boolean).join(" · ")].filter(Boolean),M,y+9.5);
@@ -741,7 +763,7 @@ async function gerarPdfPrevio(){
 
     const nome=`Orcamento_previo_${(c.nome||"cliente").normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^A-Za-z0-9]+/g,"_")}_${(pv.safra||"").replace(/\D+/g,"-")}.pdf`;
     const blob=doc.output("blob"); S.lastPdf={nome,blob};
-    try{ if(window.__guardarPdf) window.__guardarPdf({blob,nome,clienteId:S.view.id,clienteNome:c.nome||"",safra:pv.safra||"",tipo:"previo",pastos:0,areaHa:0,total:0,custoHa:+recCusto(rec,pr).toFixed(2)}); }catch(e){ console.warn(e); }
+    try{ if(window.__guardarPdf) window.__guardarPdf({blob,nome,clienteId:S.view.id,clienteNome:c.nome||"",safra:pv.safra||"",tipo:"previo",pastos:perfis.length,areaHa:+rs.ha.toFixed(2),total:0,custoHa:rs.medio!=null?+rs.medio.toFixed(2):null}); }catch(e){ console.warn(e); }
     if(!downloads){ toast("Download não disponível nesta visualização."); return; }
     S.gerando="Confirme o download…"; bar();
     try{ await downloads.save({filename:nome,data:blob}); toast("PDF salvo"); }
@@ -802,7 +824,8 @@ document.addEventListener("input", e=>{
   else if(t.dataset.cf){ S.draft.config[t.dataset.cf]=t.value; S.dirty=true; bar(); }
   else if(t.dataset.preco!=null){ S.draft.precos[t.dataset.preco]=t.value; S.dirty=true; if(S.view.name==="previo"){ updPrevio(); bar(); } else render(); }
   else if(t.dataset.pp){ S.draft[t.dataset.pp]=t.value; S.dirty=true; bar(); }
-  else if(t.dataset.perfil!=null){ S.draft.perfis[+t.dataset.perfil][t.dataset.k]=t.value; S.dirty=true; bar(); const el=document.getElementById("pf-tot"); if(el) el.textContent=fmtHa(S.draft.perfis.reduce((s,x)=>s+(dec(x.ha)||0),0))+" ha"; }
+  else if(t.dataset.perfil!=null){ const pf=S.draft.perfis[+t.dataset.perfil]; pf[t.dataset.k]=t.value; S.dirty=true;
+    if(t.dataset.k==="modalidade"){ ajustarModo(pf); S.draft.modalidade=pf.modalidade; render(); } else { bar(); const r=document.getElementById("pv-resumo"); if(r) r.innerHTML=resumoHtml(); } }
   else if(t.dataset.w!=null){ S.draft.daninhas[+t.dataset.w][t.dataset.k]=t.value; S.dirty=true; bar(); }
   else if(t.dataset.area!=null){ S.draft.areas[+t.dataset.area].nome=t.value; S.dirty=true; bar(); }
   else if(t.dataset.foto!=null){ S.draft.fotos[+t.dataset.foto].legenda=t.value; S.dirty=true; bar(); }
@@ -849,7 +872,7 @@ document.addEventListener("click", async e=>{
   if(sb&&S.draft){ const f=sb.dataset.seg,v=sb.dataset.v; S.draft[f]=S.draft[f]===v?"":v; S.dirty=true; render(); return; }
   const b=e.target.closest("[data-a]"); if(!b) return;
   const a=b.dataset.a;
-  if(a!=="excluir-cliente"&&a!=="excluir-pasto"&&a!=="excluir-area"&&a!=="apagar-biblioteca") S.armed=null;
+  if(a!=="excluir-cliente"&&a!=="excluir-pasto"&&a!=="excluir-area"&&a!=="apagar-biblioteca"&&a!=="rm-perfil") S.armed=null;
   switch(a){
     case "novo-cliente": go({name:"cliente"}); break;
     case "aba-lista": S.aba=b.dataset.v; render(); break;
@@ -859,8 +882,9 @@ document.addEventListener("click", async e=>{
     case "dn-catalogo": S.dnCat=!S.dnCat; S.qd=""; render(); break;
     case "dn-toggle": { const v=b.dataset.v; const i=S.draft.daninhas.findIndex(w=>w.nome===v); if(i>=0) S.draft.daninhas.splice(i,1); else S.draft.daninhas.push({nome:v}); S.dirty=true; render(); break; }
     case "dn-add": addDaninhaDigitada(); break;
-    case "add-perfil": S.draft.perfis.push({nome:"",ha:"",precoHa:""}); S.dirty=true; render(); document.getElementById(`pf-${S.draft.perfis.length-1}-n`)?.focus(); break;
-    case "rm-perfil": S.draft.perfis.splice(+b.dataset.i,1); S.dirty=true; render(); break;
+    case "add-perfil": S.draft.perfis.push(novoPerfil()); ativarPerfil(S.draft.perfis.length-1); S.dirty=true; render(); document.getElementById("pf-n")?.focus(); document.querySelector(".perfil-ed")?.scrollIntoView({block:"start"}); break;
+    case "ir-perfil": ativarPerfil(+b.dataset.i); render(); break;
+    case "rm-perfil": if(S.armed!=="perfil"){ S.armed="perfil"; render(); break; } S.armed=null; S.draft.perfis.splice(S.pi,1); ativarPerfil(S.pi); S.dirty=true; render(); break;
     case "dn-rm": S.draft.daninhas.splice(+b.dataset.i,1); S.dirty=true; render(); break;
     case "salvar-previo": await salvarPrevio(); break;
     case "gerar-pdf-previo": await gerarPdfPrevio(); break;
