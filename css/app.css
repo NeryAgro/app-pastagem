@@ -192,3 +192,31 @@ details.card[open] summary{margin-bottom:10px}
 .logo-emp p{margin:0}
 .logo-prev{background:#fff;border:1px solid var(--line);border-radius:8px;padding:10px;align-self:flex-start;max-width:100%}
 .logo-prev img{max-height:60px;max-width:240px;display:block}
+
+/* orçamento prévio */
+.seg.tabs{align-self:flex-start;max-width:100%}
+.seg.tabs button{flex:0 1 auto;padding:6px 12px;white-space:nowrap}
+.seg.tipo{margin-top:4px}
+.seg.tipo button{flex-direction:column;align-items:flex-start;gap:2px;padding:10px 12px;text-align:left;min-height:58px}
+.seg.tipo button b{font-size:15px;color:var(--fg)}
+.seg.tipo button small{font-weight:500;font-size:12.5px}
+.seg.tipo button[aria-pressed="true"] b,.seg.tipo button[aria-pressed="true"] small{color:var(--accent-ink)}
+.chip.prev{background:var(--accent);color:var(--accent-ink)}
+.dn-sel{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.dn-card{position:relative;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--bg)}
+.dn-card img,.dn-card .dn-sem{display:flex;width:100%;aspect-ratio:6/5;object-fit:cover}
+.dn-sem{display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:12.5px;background:var(--surface-2)}
+.dn-card .dn-t{padding:6px 8px;display:flex;flex-direction:column;line-height:1.3}
+.dn-card .dn-t b{font-size:13.5px}
+.dn-card .dn-t i{font-size:12px;color:var(--muted)}
+.dn-card .x{position:absolute;top:4px;right:4px;min-height:32px;padding:4px 9px;background:var(--surface)}
+.dn-add{flex-wrap:nowrap}
+.dn-add input{flex:1}
+.dn-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px;max-height:60vh;overflow:auto}
+.dn-op{flex-direction:column;align-items:stretch;padding:0;overflow:hidden;gap:0;font-size:12.5px;font-weight:600;text-align:left}
+.dn-op img,.dn-op .dn-sem{display:flex;width:100%;aspect-ratio:6/5;object-fit:cover}
+.dn-op span:last-child{padding:5px 7px;line-height:1.25}
+.dn-op[aria-pressed="true"]{border:2px solid var(--accent);box-shadow:0 0 0 2px var(--accent) inset}
+.dn-op[aria-pressed="true"] span:last-child{background:var(--accent);color:var(--accent-ink)}
+label.check{display:flex;gap:10px;align-items:center;font-weight:600;font-size:14.5px;cursor:pointer}
+label.check input{width:22px;height:22px;min-height:0;flex:none;accent-color:var(--accent)}

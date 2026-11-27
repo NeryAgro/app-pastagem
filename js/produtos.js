@@ -77,5 +77,7 @@
     return "";
   };
   window.produtoFormLigar(document);
+  // Chave do nome da planta daninha (sem acento, minúsculo) para achar a foto no catálogo.
+  window.chaveDaninha = n => String(n || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   window.produtoId = nome => (String(nome).normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "produto") + "-" + Date.now().toString(36);
 })();

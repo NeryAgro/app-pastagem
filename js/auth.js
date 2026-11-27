@@ -306,6 +306,23 @@
       const locais = Object.keys(((await db._tudo()).produtos) || {});
       for (const id of locais) if (!ids.has(id)) await db._aplicarRemoto("produtos", id, null);
     }
+    // Fotos das plantas daninhas (catálogo global, só leitura para os usuários). Guardadas no aparelho para uso sem internet.
+    async function receberCatalogo() {
+      const kK = "aep-catcur-" + uid;
+      let cursor = localStorage.getItem(kK) || "1970-01-01T00:00:00Z";
+      for (;;) {
+        const { data, error } = await sb.from("catalogo_daninhas").select("nome,cientifico,thumb,foto,apagado,atualizado_em")
+          .gt("atualizado_em", cursor).order("atualizado_em", { ascending: true }).limit(30);
+        if (error) { if (/catalogo_daninhas|does not exist|schema cache/i.test(error.message || "")) return; throw error; }
+        for (const r of data) {
+          const id = window.chaveDaninha(r.nome);
+          await db._aplicarRemoto("_daninhas", id, r.apagado ? null : { nome: r.nome, cientifico: r.cientifico || "", thumb: r.thumb, foto: r.foto });
+          cursor = r.atualizado_em;
+        }
+        try { localStorage.setItem(kK, cursor); } catch (e) {}
+        if (data.length < 30) break;
+      }
+    }
     // PDFs gerados: ficam na fila do aparelho até subir para a nuvem (Storage "propostas").
     async function enviarPdfs() {
       const fila = ((await db._tudo())._pdfpend) || {};
@@ -318,7 +335,7 @@
       }
     }
     return {
-      receberProdutos,
+      receberProdutos, receberCatalogo,
       ligar(d) { db = d; },
       pendentes: () => Object.keys(pend).length,
       status,
@@ -327,7 +344,7 @@
         if (rodando) return rodando;
         rodando = (async () => {
           if (!navigator.onLine || !db) { mostrarStatus(); return; }
-          try { await enviarPdfs(); await enviar(); await receber(); await receberProdutos(); erro = ""; ultimo = new Date(); }
+          try { await enviarPdfs(); await enviar(); await receber(); await receberProdutos(); await receberCatalogo().catch(e => console.warn("catalogo", e)); erro = ""; ultimo = new Date(); }
           catch (e) { erro = traduz(e); console.warn("sync", e); }
           mostrarStatus();
         })().finally(() => { rodando = null; });
@@ -420,6 +437,7 @@
         </div>`; }).join("")}
       </div>`;
       await painelProdutos(perfis);
+      await painelCatalogo();
     } catch (e) {
       painel.innerHTML = `<div class="auth-in wide"><div class="row spread"><h1>Painel do dono</h1><button class="ghost" data-painel="fechar">Fechar</button></div><p class="auth-msg err">${esc(traduz(e))}</p></div>`;
     }
@@ -450,6 +468,54 @@
     const primeiroUsuario = painel.querySelector(".user-row");
     if (primeiroUsuario) primeiroUsuario.insertAdjacentHTML("beforebegin", html);
     else painel.querySelector(".auth-in").insertAdjacentHTML("beforeend", html);
+  }
+  /* Fotos das plantas daninhas: o dono importa um .zip (catalogo.json + fotos) ou fotos soltas com o nome da planta. */
+  async function painelCatalogo() {
+    const { data, error } = await sb.from("catalogo_daninhas").select("nome").eq("apagado", false);
+    const falta = error && /catalogo_daninhas|does not exist|schema cache/i.test(error.message || "");
+    const html = `<h2 class="painel-h">Fotos das plantas daninhas</h2>
+      <div class="card section" id="cat-dn">
+        ${falta ? `<p class="note">Para ligar as fotos, rode o arquivo <b>supabase/05-catalogo-daninhas.sql</b> no SQL Editor do Supabase e abra o Painel de novo.</p>`
+        : error ? `<p class="auth-msg err">${esc(traduz(error))}</p>`
+        : `<p class="note">${data.length} planta(s) com foto. As fotos aparecem no Orçamento prévio e no PDF. Importe o pacote .zip das fotos ou fotos soltas (o nome do arquivo deve ser o nome da planta, ex.: <i>Assa-peixe-branco.jpg</i>). Uma foto com o mesmo nome substitui a anterior.</p>
+          <div class="row"><label class="btn file-btn primary">Importar fotos (.zip ou imagens)<input type="file" id="cat-imp" multiple></label></div>
+          <p class="note" id="cat-msg"></p>`}
+      </div>`;
+    const alvo = [...painel.querySelectorAll(".painel-h")].find(h => /Usuários/.test(h.textContent));
+    if (alvo) alvo.insertAdjacentHTML("beforebegin", html); else painel.querySelector(".auth-in").insertAdjacentHTML("beforeend", html);
+  }
+  async function reduzirFoto(blob, max, q) {
+    const bmp = await createImageBitmap(blob); const s = Math.min(1, max / Math.max(bmp.width, bmp.height));
+    const cv = document.createElement("canvas"); cv.width = Math.max(1, Math.round(bmp.width * s)); cv.height = Math.max(1, Math.round(bmp.height * s));
+    const cx = cv.getContext("2d"); cx.fillStyle = "#fff"; cx.fillRect(0, 0, cv.width, cv.height); cx.drawImage(bmp, 0, 0, cv.width, cv.height);
+    if (bmp.close) bmp.close(); return cv.toDataURL("image/jpeg", q);
+  }
+  async function importarCatalogo(files) {
+    const msg = painel.querySelector("#cat-msg"); const diz = t => { if (msg) msg.textContent = t; };
+    const itens = []; // {nome, cientifico, blob}
+    const ehImg = n => /\.(jpe?g|png|webp)$/i.test(n);
+    const nomeDe = n => n.split("/").pop().replace(/\.[^.]+$/, "").replace(/_/g, " ").trim();
+    for (const f of files) {
+      if (/\.zip$/i.test(f.name) || f.type === "application/zip") {
+        const zip = await JSZip.loadAsync(f);
+        let lista = null; const man = zip.file(/(^|\/)catalogo\.json$/i)[0];
+        if (man) { try { lista = JSON.parse(await man.async("string")); } catch (e) {} }
+        if (Array.isArray(lista)) { for (const it of lista) { const z = zip.file(it.arquivo) || zip.file(new RegExp("(^|/)" + it.arquivo.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$"))[0]; if (z && it.nome) itens.push({ nome: it.nome, cientifico: it.cientifico || "", blob: await z.async("blob") }); } }
+        else { for (const z of Object.values(zip.files)) if (!z.dir && ehImg(z.name) && !/__MACOSX/.test(z.name)) itens.push({ nome: nomeDe(z.name), cientifico: "", blob: await z.async("blob") }); }
+      } else if (ehImg(f.name) || /^image\//.test(f.type)) itens.push({ nome: nomeDe(f.name), cientifico: "", blob: f });
+    }
+    if (!itens.length) { diz("Nenhuma foto encontrada no que foi escolhido."); return; }
+    let n = 0, falhas = 0, lote = [];
+    const enviar = async () => { if (!lote.length) return; const { error } = await sb.from("catalogo_daninhas").upsert(lote, { onConflict: "nome" }); lote = []; if (error) throw error; };
+    for (const it of itens) {
+      n++; diz(`Preparando ${n} de ${itens.length}: ${it.nome}…`);
+      try { lote.push({ nome: it.nome, cientifico: it.cientifico, thumb: await reduzirFoto(it.blob, 240, 0.72), foto: await reduzirFoto(it.blob, 800, 0.72), apagado: false }); }
+      catch (e) { falhas++; }
+      if (lote.length >= 5) await enviar();
+    }
+    await enviar();
+    await sync.receberCatalogo().catch(() => {});
+    diz(`${itens.length - falhas} foto(s) importada(s)${falhas ? ` · ${falhas} não puderam ser lidas` : ""}.`);
   }
   async function produtoStatus(id, status) {
     let motivo = null;
@@ -519,7 +585,9 @@
       } catch (err) { b.textContent = "Exportar dados de todos (JSON)"; b.disabled = false; const m = painel.querySelector(".auth-msg"); if (m) { m.textContent = traduz(err); m.classList.add("err"); } }
     }
   });
-  painel.addEventListener("change", e => {
+  painel.addEventListener("change", async e => {
+    if (e.target.id === "cat-imp") { const fs = [...e.target.files]; e.target.value = ""; if (!fs.length) return;
+      const m = painel.querySelector("#cat-msg"); try { await importarCatalogo(fs); } catch (err) { if (m) { m.textContent = traduz(err); m.classList.add("auth-msg", "err"); } } return; }
     const s = e.target.closest("[data-painel-papel]"); if (!s) return;
     definir(s.dataset.painelPapel, s.dataset.s, s.value);
   });
